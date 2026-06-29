@@ -25,7 +25,7 @@ app.get('/api/candles/:symbol', async (req, res) => {
     // Get 15-min candles from Yahoo Finance
     const candles = await yahooFinanceService.get15MinCandles(symbol);
 
-    // Get analysis (RSI, SMA) and volume from Alpha Vantage
+    // Get analysis (RSI, SMA) and daily volume
     const analysis = await yahooFinanceService.getStockAnalysis(candles, symbol);
 
     console.log(`✅ [${symbol}] Sending analysis:`, analysis);
@@ -71,7 +71,7 @@ app.get('/api/stocks', async (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Shalimar Backend running on port ${PORT}`);
-  console.log(`📈 Using Yahoo Finance for 15-min candles`);
-  console.log(`📊 Using Alpha Vantage for volume data`);
+  console.log(`📈 Using Yahoo Finance for 15-min candles + daily volume`);
   console.log(`🔄 Auto-refresh every 15 minutes`);
+  console.log(`✅ Ready to serve trading data!`);
 });
