@@ -31,10 +31,10 @@ app.get('/api/candles/:symbol', async (req, res) => {
     console.log(`✅ [${symbol}] Sending analysis:`, analysis);
 
     res.json({
-      symbol,
-      ...analysis,
-      lastUpdate: new Date().toISOString(),
-    });
+  symbol,
+  analysis,  // ← Nest it under 'analysis' key
+  lastUpdate: new Date().toISOString(),
+});
   } catch (error) {
     console.error(`❌ [${symbol}] Error:`, error.message);
     res.status(500).json({ error: error.message });
