@@ -6,7 +6,7 @@ class YahooFinanceService {
     this.lastDailyFetch = {};
   }
 
-  // Get daily candles via direct HTTP
+  // Get daily candles via direct HTTP with headers
   async getDailyCandles(symbol) {
     try {
       console.log(`[${symbol}] Fetching daily candles via HTTP...`);
@@ -16,7 +16,18 @@ class YahooFinanceService {
       
       const url = `https://query1.finance.yahoo.com/v7/finance/download/${symbol}?period1=${oneYearAgo}&period2=${now}&interval=1d&events=history`;
       
-      const response = await axios.get(url);
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+        },
+        timeout: 10000,
+      });
+      
       const lines = response.data.split('\n').filter(line => line.trim());
       
       if (lines.length < 2) {
@@ -46,7 +57,7 @@ class YahooFinanceService {
     }
   }
 
-  // Get 15-min candles (use daily as fallback)
+  // Get 15-min candles
   async get15MinCandles(symbol) {
     try {
       console.log(`[${symbol}] Fetching 15-min candles...`);
