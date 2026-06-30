@@ -1,7 +1,6 @@
 const axios = require('axios');
-const HttpProxyAgent = require('http-proxy-agent');
-const HttpsProxyAgent = require('https-proxy-agent');
-
+const { HttpProxyAgent } = require('http-proxy-agent');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 class YahooFinanceService {
   constructor() {
     this.volumeCache = {};
