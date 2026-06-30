@@ -1,4 +1,4 @@
-const { chart } = require('yahoo-finance2');
+const axios = require('axios');
 
 class YahooFinanceService {
   constructor() {
@@ -6,56 +6,54 @@ class YahooFinanceService {
     this.lastDailyFetch = {};
   }
 
-  // Get 15-min candles
-  async get15MinCandles(symbol) {
-    try {
-      console.log(`[${symbol}] Fetching 15-min candles...`);
-      
-      const now = new Date();
-      const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
-      
-      const result = await chart(symbol, { 
-        interval: '15m',
-        period1: fiveDaysAgo,
-        period2: now,
-      });
-
-      if (!result || !result.quotes || result.quotes.length === 0) {
-        console.log(`[${symbol}] No 15m quotes, trying daily...`);
-        return await this.getDailyCandles(symbol);
-      }
-
-      console.log(`[${symbol}] Got ${result.quotes.length} candles`);
-      return result.quotes;
-    } catch (error) {
-      console.error(`[${symbol}] 15m error:`, error.message);
-      return await this.getDailyCandles(symbol);
-    }
-  }
-
-  // Get daily candles
+  // Get daily candles via direct HTTP
   async getDailyCandles(symbol) {
     try {
-      console.log(`[${symbol}] Fetching daily candles...`);
+      console.log(`[${symbol}] Fetching daily candles via HTTP...`);
       
-      const now = new Date();
-      const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+      const now = Math.floor(Date.now() / 1000);
+      const oneYearAgo = now - (365 * 24 * 60 * 60);
       
-      const result = await chart(symbol, {
-        interval: '1d',
-        period1: oneYearAgo,
-        period2: now,
-      });
-
-      if (!result || !result.quotes || result.quotes.length === 0) {
-        throw new Error('No daily quotes');
+      const url = `https://query1.finance.yahoo.com/v7/finance/download/${symbol}?period1=${oneYearAgo}&period2=${now}&interval=1d&events=history`;
+      
+      const response = await axios.get(url);
+      const lines = response.data.split('\n').filter(line => line.trim());
+      
+      if (lines.length < 2) {
+        throw new Error('No data returned');
       }
 
-      console.log(`[${symbol}] Got ${result.quotes.length} daily candles`);
-      return result.quotes;
+      const quotes = [];
+      for (let i = lines.length - 1; i >= 1; i--) {
+        const parts = lines[i].split(',');
+        if (parts.length >= 6 && parts[4] !== 'null') {
+          quotes.push({
+            date: parts[0],
+            open: parseFloat(parts[1]),
+            high: parseFloat(parts[2]),
+            low: parseFloat(parts[3]),
+            close: parseFloat(parts[4]),
+            volume: parseInt(parts[5]),
+          });
+        }
+      }
+
+      console.log(`[${symbol}] Got ${quotes.length} daily candles`);
+      return quotes;
     } catch (error) {
       console.error(`[${symbol}] Daily error:`, error.message);
       throw new Error(`Could not fetch candles: ${error.message}`);
+    }
+  }
+
+  // Get 15-min candles (use daily as fallback)
+  async get15MinCandles(symbol) {
+    try {
+      console.log(`[${symbol}] Fetching 15-min candles...`);
+      return await this.getDailyCandles(symbol);
+    } catch (error) {
+      console.error(`[${symbol}] 15m error:`, error.message);
+      throw error;
     }
   }
 
@@ -121,23 +119,13 @@ class YahooFinanceService {
 
       if (this.volumeCache[cacheKey] && this.lastDailyFetch[cacheKey] && 
           now - this.lastDailyFetch[cacheKey] < 24 * 60 * 60 * 1000) {
+        console.log(`[${symbol}] Using cached volume`);
         return this.volumeCache[cacheKey];
       }
 
-      const today = new Date();
-      const oneMonthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const candles = await this.getDailyCandles(symbol);
+      const volume = candles[0]?.volume || 0;
 
-      const result = await chart(symbol, {
-        interval: '1d',
-        period1: oneMonthAgo,
-        period2: today,
-      });
-
-      if (!result || !result.quotes || result.quotes.length === 0) {
-        return 0;
-      }
-
-      const volume = result.quotes[result.quotes.length - 1]?.volume || 0;
       this.volumeCache[cacheKey] = volume;
       this.lastDailyFetch[cacheKey] = now;
 
