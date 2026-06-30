@@ -1,4 +1,4 @@
-const yahooFinance = require('yahoo-finance2').default;
+const yf = require('yahoo-finance2');
 
 class YahooFinanceService {
   constructor() {
@@ -11,19 +11,52 @@ class YahooFinanceService {
     try {
       console.log(`[${symbol}] Fetching 15-min candles from Yahoo Finance...`);
       
-      const result = await yahooFinance.chart(symbol, {
+      // Calculate date range (last 5 days)
+      const now = new Date();
+      const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
+      
+      const result = await yf.chart(symbol, { 
         interval: '15m',
+        period1: fiveDaysAgo,
+        period2: now,
       });
 
       if (!result || !result.quotes || result.quotes.length === 0) {
-        throw new Error('No quotes returned from Yahoo Finance');
+        console.warn(`[${symbol}] No 15m quotes, trying daily fallback...`);
+        return await this.getDailyCandles(symbol);
       }
 
       console.log(`[${symbol}] Got ${result.quotes.length} candles`);
-      return result.quotes;
+      return result.quotes || [];
     } catch (error) {
-      console.error(`[${symbol}] Error fetching 15-min candles:`, error.message);
-      throw new Error(`Failed to fetch 15-min candles: ${error.message}`);
+      console.error(`[${symbol}] 15m error:`, error.message);
+      return await this.getDailyCandles(symbol);
+    }
+  }
+
+  // Get daily candles as fallback
+  async getDailyCandles(symbol) {
+    try {
+      console.log(`[${symbol}] Fetching daily candles...`);
+      
+      const now = new Date();
+      const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+      
+      const result = await yf.chart(symbol, {
+        interval: '1d',
+        period1: oneYearAgo,
+        period2: now,
+      });
+
+      if (!result || !result.quotes || result.quotes.length === 0) {
+        throw new Error('No daily quotes found');
+      }
+
+      console.log(`[${symbol}] Got ${result.quotes.length} daily candles`);
+      return result.quotes || [];
+    } catch (error) {
+      console.error(`[${symbol}] Daily fallback error:`, error.message);
+      throw new Error(`Could not fetch candles: ${error.message}`);
     }
   }
 
@@ -43,7 +76,6 @@ class YahooFinanceService {
     let avgGain = 0;
     let avgLoss = 0;
 
-    // Initial average
     for (let i = 0; i < period; i++) {
       if (changes[i] > 0) {
         avgGain += changes[i];
@@ -55,7 +87,6 @@ class YahooFinanceService {
     avgGain /= period;
     avgLoss /= period;
 
-    // Wilder's smoothing
     for (let i = period; i < changes.length; i++) {
       const change = changes[i];
       if (change > 0) {
@@ -90,37 +121,39 @@ class YahooFinanceService {
       const now = Date.now();
       const cacheKey = symbol;
 
-      // Check cache (24 hour TTL)
       if (
         this.volumeCache[cacheKey] &&
         this.lastDailyFetch[cacheKey] &&
         now - this.lastDailyFetch[cacheKey] < 24 * 60 * 60 * 1000
       ) {
-        console.log(`[${symbol}] Using cached daily volume`);
+        console.log(`[${symbol}] Using cached volume`);
         return this.volumeCache[cacheKey];
       }
 
-      console.log(`[${symbol}] Fetching daily volume from Yahoo Finance...`);
+      console.log(`[${symbol}] Fetching daily volume...`);
 
-      const result = await yahooFinance.chart(symbol, {
+      const today = new Date();
+      const oneMonthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      const result = await yf.chart(symbol, {
         interval: '1d',
+        period1: oneMonthAgo,
+        period2: today,
       });
 
       if (!result || !result.quotes || result.quotes.length === 0) {
-        console.warn(`[${symbol}] No daily data found, using 0`);
         return 0;
       }
 
       const volume = result.quotes[result.quotes.length - 1]?.volume || 0;
 
-      // Cache it
       this.volumeCache[cacheKey] = volume;
       this.lastDailyFetch[cacheKey] = now;
 
-      console.log(`[${symbol}] Daily volume: ${volume}`);
+      console.log(`[${symbol}] Volume: ${volume}`);
       return volume;
     } catch (error) {
-      console.error(`[${symbol}] Error fetching daily volume:`, error.message);
+      console.error(`[${symbol}] Volume error:`, error.message);
       return 0;
     }
   }
@@ -129,7 +162,7 @@ class YahooFinanceService {
   async getStockAnalysis(candles, symbol) {
     try {
       if (!candles || candles.length === 0) {
-        throw new Error('No candle data available');
+        throw new Error('No candle data');
       }
 
       const rsi = this.calculateRSI(candles, 14);
@@ -146,10 +179,10 @@ class YahooFinanceService {
         volume: Math.round(volume),
       };
 
-      console.log(`[${symbol}] Analysis complete:`, analysis);
+      console.log(`[${symbol}] Analysis:`, analysis);
       return analysis;
     } catch (error) {
-      console.error(`[${symbol}] Error in getStockAnalysis:`, error.message);
+      console.error(`[${symbol}] Analysis error:`, error.message);
       throw error;
     }
   }
