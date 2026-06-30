@@ -5,7 +5,7 @@ class YahooFinanceService {
   constructor() {
     this.volumeCache = {};
     this.lastDailyFetch = {};
-    console.log('YahooFinanceService initialized (NO PROXY)');
+    console.log('YahooFinanceService initialized');
   }
 
   async getDailyCandles(symbol) {
@@ -18,14 +18,33 @@ class YahooFinanceService {
         rejectUnauthorized: false
       });
 
-      const response = await axios.get(url, {
+      const config = {
         httpsAgent: httpsAgent,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         },
         timeout: 15000
-      });
+      };
 
+      const user = process.env.PROXY_USER;
+      const pass = process.env.PROXY_PASS;
+      const host = process.env.PROXY_HOST;
+      const port = process.env.PROXY_PORT;
+
+      if (user && pass && host && port) {
+        config.proxy = {
+          protocol: 'http',
+          host: host,
+          port: parseInt(port),
+          auth: {
+            username: user,
+            password: pass
+          }
+        };
+        console.log('[' + symbol + '] Using proxy');
+      }
+
+      const response = await axios.get(url, config);
       const lines = response.data.split('\n').filter(line => line.trim());
       
       if (lines.length < 2) throw new Error('No data');
