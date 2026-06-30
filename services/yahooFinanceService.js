@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { HttpProxyAgent } = require('http-proxy-agent');
 const { HttpsProxyAgent } = require('https-proxy-agent');
+
 class YahooFinanceService {
   constructor() {
     this.volumeCache = {};
@@ -37,6 +38,7 @@ class YahooFinanceService {
       const response = await axios.get(url, {
         httpAgent: this.httpAgent,
         httpsAgent: this.httpsAgent,
+        rejectUnauthorized: false,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
