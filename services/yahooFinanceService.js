@@ -1,4 +1,4 @@
-const yf = require('yahoo-finance2');
+const { chart } = require('yahoo-finance2');
 
 class YahooFinanceService {
   constructor() {
@@ -9,32 +9,31 @@ class YahooFinanceService {
   // Get 15-min candles
   async get15MinCandles(symbol) {
     try {
-      console.log(`[${symbol}] Fetching 15-min candles from Yahoo Finance...`);
+      console.log(`[${symbol}] Fetching 15-min candles...`);
       
-      // Calculate date range (last 5 days)
       const now = new Date();
       const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
       
-      const result = await yf.chart(symbol, { 
+      const result = await chart(symbol, { 
         interval: '15m',
         period1: fiveDaysAgo,
         period2: now,
       });
 
       if (!result || !result.quotes || result.quotes.length === 0) {
-        console.warn(`[${symbol}] No 15m quotes, trying daily fallback...`);
+        console.log(`[${symbol}] No 15m quotes, trying daily...`);
         return await this.getDailyCandles(symbol);
       }
 
       console.log(`[${symbol}] Got ${result.quotes.length} candles`);
-      return result.quotes || [];
+      return result.quotes;
     } catch (error) {
       console.error(`[${symbol}] 15m error:`, error.message);
       return await this.getDailyCandles(symbol);
     }
   }
 
-  // Get daily candles as fallback
+  // Get daily candles
   async getDailyCandles(symbol) {
     try {
       console.log(`[${symbol}] Fetching daily candles...`);
@@ -42,25 +41,25 @@ class YahooFinanceService {
       const now = new Date();
       const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
       
-      const result = await yf.chart(symbol, {
+      const result = await chart(symbol, {
         interval: '1d',
         period1: oneYearAgo,
         period2: now,
       });
 
       if (!result || !result.quotes || result.quotes.length === 0) {
-        throw new Error('No daily quotes found');
+        throw new Error('No daily quotes');
       }
 
       console.log(`[${symbol}] Got ${result.quotes.length} daily candles`);
-      return result.quotes || [];
+      return result.quotes;
     } catch (error) {
-      console.error(`[${symbol}] Daily fallback error:`, error.message);
+      console.error(`[${symbol}] Daily error:`, error.message);
       throw new Error(`Could not fetch candles: ${error.message}`);
     }
   }
 
-  // Calculate RSI with Wilder's smoothing
+  // Calculate RSI
   calculateRSI(candles, period = 14) {
     if (!candles || candles.length < period + 1) {
       return 50;
@@ -100,7 +99,6 @@ class YahooFinanceService {
 
     const rs = avgGain / avgLoss;
     const rsi = 100 - (100 / (1 + rs));
-
     return Math.max(0, Math.min(100, rsi));
   }
 
@@ -116,26 +114,20 @@ class YahooFinanceService {
   }
 
   // Get daily volume
-  async getDailyVolumeFromYahoo(symbol) {
+  async getDailyVolume(symbol) {
     try {
       const now = Date.now();
       const cacheKey = symbol;
 
-      if (
-        this.volumeCache[cacheKey] &&
-        this.lastDailyFetch[cacheKey] &&
-        now - this.lastDailyFetch[cacheKey] < 24 * 60 * 60 * 1000
-      ) {
-        console.log(`[${symbol}] Using cached volume`);
+      if (this.volumeCache[cacheKey] && this.lastDailyFetch[cacheKey] && 
+          now - this.lastDailyFetch[cacheKey] < 24 * 60 * 60 * 1000) {
         return this.volumeCache[cacheKey];
       }
-
-      console.log(`[${symbol}] Fetching daily volume...`);
 
       const today = new Date();
       const oneMonthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-      const result = await yf.chart(symbol, {
+      const result = await chart(symbol, {
         interval: '1d',
         period1: oneMonthAgo,
         period2: today,
@@ -146,7 +138,6 @@ class YahooFinanceService {
       }
 
       const volume = result.quotes[result.quotes.length - 1]?.volume || 0;
-
       this.volumeCache[cacheKey] = volume;
       this.lastDailyFetch[cacheKey] = now;
 
@@ -158,7 +149,7 @@ class YahooFinanceService {
     }
   }
 
-  // Get complete stock analysis
+  // Get complete analysis
   async getStockAnalysis(candles, symbol) {
     try {
       if (!candles || candles.length === 0) {
@@ -169,7 +160,7 @@ class YahooFinanceService {
       const sma20 = this.calculateSMA(candles, 20);
       const sma50 = this.calculateSMA(candles, 50);
       const currentPrice = candles[0]?.close || 0;
-      const volume = await this.getDailyVolumeFromYahoo(symbol);
+      const volume = await this.getDailyVolume(symbol);
 
       const analysis = {
         rsi: parseFloat(rsi.toFixed(2)),
@@ -179,7 +170,7 @@ class YahooFinanceService {
         volume: Math.round(volume),
       };
 
-      console.log(`[${symbol}] Analysis:`, analysis);
+      console.log(`[${symbol}] Analysis complete:`, analysis);
       return analysis;
     } catch (error) {
       console.error(`[${symbol}] Analysis error:`, error.message);
