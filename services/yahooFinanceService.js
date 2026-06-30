@@ -13,7 +13,6 @@ class YahooFinanceService {
       
       const result = await yahooFinance.chart(symbol, {
         interval: '15m',
-        period: '5d',
       });
 
       if (!result || !result.quotes || result.quotes.length === 0) {
@@ -85,7 +84,7 @@ class YahooFinanceService {
     return sum / period;
   }
 
-  // Get daily volume (cached for 24 hours)
+  // Get daily volume
   async getDailyVolumeFromYahoo(symbol) {
     try {
       const now = Date.now();
@@ -105,7 +104,6 @@ class YahooFinanceService {
 
       const result = await yahooFinance.chart(symbol, {
         interval: '1d',
-        period: '1d',
       });
 
       if (!result || !result.quotes || result.quotes.length === 0) {
@@ -113,7 +111,7 @@ class YahooFinanceService {
         return 0;
       }
 
-      const volume = result.quotes[result.quotes.length - 1].volume || 0;
+      const volume = result.quotes[result.quotes.length - 1]?.volume || 0;
 
       // Cache it
       this.volumeCache[cacheKey] = volume;
