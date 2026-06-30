@@ -1,29 +1,31 @@
 const axios = require('axios');
-const { HttpProxyAgent } = require('http-proxy-agent');
-const { HttpsProxyAgent } = require('https-proxy-agent');
 
 class YahooFinanceService {
   constructor() {
     this.volumeCache = {};
     this.lastDailyFetch = {};
     
-    const PROXY_USER = process.env.PROXY_USER;
-    const PROXY_PASS = process.env.PROXY_PASS;
-    const PROXY_HOST = process.env.PROXY_HOST;
-    const PROXY_PORT = process.env.PROXY_PORT;
+    // Create axios instance with proxy and SSL bypass
+    const proxyUrl = `http://${process.env.PROXY_USER}:${process.env.PROXY_PASS}@${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
     
-    if (!PROXY_USER || !PROXY_PASS || !PROXY_HOST || !PROXY_PORT) {
-      console.warn('⚠️ WARNING: Proxy credentials not set!');
-      this.proxyUrl = null;
-    } else {
-      this.proxyUrl = `http://${PROXY_USER}:${PROXY_PASS}@${PROXY_HOST}:${PROXY_PORT}`;
-      console.log('✅ Proxy configured');
-    }
+    this.axiosInstance = axios.create({
+      proxy: {
+        protocol: 'http',
+        host: process.env.PROXY_HOST,
+        port: parseInt(process.env.PROXY_PORT),
+        auth: {
+          username: process.env.PROXY_USER,
+          password: process.env.PROXY_PASS
+        }
+      },
+      httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+      httpAgent: new (require('http').Agent)(),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
     
-    if (this.proxyUrl) {
-      this.httpAgent = new HttpProxyAgent(this.proxyUrl);
-      this.httpsAgent = new HttpsProxyAgent(this.proxyUrl);
-    }
+    console.log('✅ Proxy configured');
   }
 
   async getDailyCandles(symbol) {
@@ -35,19 +37,7 @@ class YahooFinanceService {
       
       const url = `https://query1.finance.yahoo.com/v7/finance/download/${symbol}?period1=${oneYearAgo}&period2=${now}&interval=1d&events=history`;
       
-      const response = await axios.get(url, {
-        httpAgent: this.httpAgent,
-        httpsAgent: this.httpsAgent,
-        rejectUnauthorized: false,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-        },
-        timeout: 15000,
-      });
+      const response = await this.axiosInstance.get(url);
 
       const lines = response.data.split('\n').filter(line => line.trim());
       
@@ -79,19 +69,11 @@ class YahooFinanceService {
   }
 
   async get15MinCandles(symbol) {
-    try {
-      console.log(`[${symbol}] Fetching 15-min candles...`);
-      return await this.getDailyCandles(symbol);
-    } catch (error) {
-      console.error(`[${symbol}] ❌ 15m error:`, error.message);
-      throw error;
-    }
+    return await this.getDailyCandles(symbol);
   }
 
   calculateRSI(candles, period = 14) {
-    if (!candles || candles.length < period + 1) {
-      return 50;
-    }
+    if (!candles || candles.length < period + 1) return 50;
 
     const closes = candles.map(c => c.close).reverse();
     const changes = [];
@@ -100,15 +82,11 @@ class YahooFinanceService {
       changes.push(closes[i] - closes[i - 1]);
     }
 
-    let avgGain = 0;
-    let avgLoss = 0;
+    let avgGain = 0, avgLoss = 0;
 
     for (let i = 0; i < period; i++) {
-      if (changes[i] > 0) {
-        avgGain += changes[i];
-      } else {
-        avgLoss += Math.abs(changes[i]);
-      }
+      if (changes[i] > 0) avgGain += changes[i];
+      else avgLoss += Math.abs(changes[i]);
     }
 
     avgGain /= period;
@@ -131,43 +109,34 @@ class YahooFinanceService {
   }
 
   calculateSMA(candles, period) {
-    if (!candles || candles.length < period) {
-      return candles?.[0]?.close || 0;
-    }
-
+    if (!candles || candles.length < period) return candles?.[0]?.close || 0;
     const closes = candles.map(c => c.close).slice(0, period);
-    const sum = closes.reduce((a, b) => a + b, 0);
-    return sum / period;
+    return closes.reduce((a, b) => a + b, 0) / period;
   }
 
   async getDailyVolume(symbol) {
     try {
       const now = Date.now();
-      const cacheKey = symbol;
-
-      if (this.volumeCache[cacheKey] && this.lastDailyFetch[cacheKey] && 
-          now - this.lastDailyFetch[cacheKey] < 24 * 60 * 60 * 1000) {
-        return this.volumeCache[cacheKey];
+      if (this.volumeCache[symbol] && this.lastDailyFetch[symbol] && 
+          now - this.lastDailyFetch[symbol] < 24 * 60 * 60 * 1000) {
+        return this.volumeCache[symbol];
       }
 
       const candles = await this.getDailyCandles(symbol);
       const volume = candles[0]?.volume || 0;
 
-      this.volumeCache[cacheKey] = volume;
-      this.lastDailyFetch[cacheKey] = now;
+      this.volumeCache[symbol] = volume;
+      this.lastDailyFetch[symbol] = now;
 
       return volume;
     } catch (error) {
-      console.error(`[${symbol}] Volume error:`, error.message);
       return 0;
     }
   }
 
   async getStockAnalysis(candles, symbol) {
     try {
-      if (!candles || candles.length === 0) {
-        throw new Error('No candle data');
-      }
+      if (!candles || candles.length === 0) throw new Error('No candle data');
 
       const rsi = this.calculateRSI(candles, 14);
       const sma20 = this.calculateSMA(candles, 20);
@@ -175,16 +144,13 @@ class YahooFinanceService {
       const currentPrice = candles[0]?.close || 0;
       const volume = await this.getDailyVolume(symbol);
 
-      const analysis = {
+      return {
         rsi: parseFloat(rsi.toFixed(2)),
         sma20: parseFloat(sma20.toFixed(2)),
         sma50: parseFloat(sma50.toFixed(2)),
         currentPrice: parseFloat(currentPrice.toFixed(2)),
         volume: Math.round(volume),
       };
-
-      console.log(`[${symbol}] ✅ Analysis:`, analysis);
-      return analysis;
     } catch (error) {
       console.error(`[${symbol}] Analysis error:`, error.message);
       throw error;
