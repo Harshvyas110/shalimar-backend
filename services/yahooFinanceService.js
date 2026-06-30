@@ -1,15 +1,34 @@
 const axios = require('axios');
+const HttpProxyAgent = require('http-proxy-agent');
+const HttpsProxyAgent = require('https-proxy-agent');
 
 class YahooFinanceService {
   constructor() {
     this.volumeCache = {};
     this.lastDailyFetch = {};
+    
+    const PROXY_USER = process.env.PROXY_USER;
+    const PROXY_PASS = process.env.PROXY_PASS;
+    const PROXY_HOST = process.env.PROXY_HOST;
+    const PROXY_PORT = process.env.PROXY_PORT;
+    
+    if (!PROXY_USER || !PROXY_PASS || !PROXY_HOST || !PROXY_PORT) {
+      console.warn('⚠️ WARNING: Proxy credentials not set!');
+      this.proxyUrl = null;
+    } else {
+      this.proxyUrl = `http://${PROXY_USER}:${PROXY_PASS}@${PROXY_HOST}:${PROXY_PORT}`;
+      console.log('✅ Proxy configured');
+    }
+    
+    if (this.proxyUrl) {
+      this.httpAgent = new HttpProxyAgent(this.proxyUrl);
+      this.httpsAgent = new HttpsProxyAgent(this.proxyUrl);
+    }
   }
 
-  // Get daily candles via direct HTTP with headers
   async getDailyCandles(symbol) {
     try {
-      console.log(`[${symbol}] Fetching daily candles via HTTP...`);
+      console.log(`[${symbol}] Fetching via proxy...`);
       
       const now = Math.floor(Date.now() / 1000);
       const oneYearAgo = now - (365 * 24 * 60 * 60);
@@ -17,17 +36,18 @@ class YahooFinanceService {
       const url = `https://query1.finance.yahoo.com/v7/finance/download/${symbol}?period1=${oneYearAgo}&period2=${now}&interval=1d&events=history`;
       
       const response = await axios.get(url, {
+        httpAgent: this.httpAgent,
+        httpsAgent: this.httpsAgent,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
           'Connection': 'keep-alive',
-          'Upgrade-Insecure-Requests': '1',
         },
-        timeout: 10000,
+        timeout: 15000,
       });
-      
+
       const lines = response.data.split('\n').filter(line => line.trim());
       
       if (lines.length < 2) {
@@ -49,26 +69,24 @@ class YahooFinanceService {
         }
       }
 
-      console.log(`[${symbol}] Got ${quotes.length} daily candles`);
+      console.log(`[${symbol}] ✅ Got ${quotes.length} candles`);
       return quotes;
     } catch (error) {
-      console.error(`[${symbol}] Daily error:`, error.message);
-      throw new Error(`Could not fetch candles: ${error.message}`);
+      console.error(`[${symbol}] ❌ Error:`, error.message);
+      throw new Error(`Failed to fetch candles: ${error.message}`);
     }
   }
 
-  // Get 15-min candles
   async get15MinCandles(symbol) {
     try {
       console.log(`[${symbol}] Fetching 15-min candles...`);
       return await this.getDailyCandles(symbol);
     } catch (error) {
-      console.error(`[${symbol}] 15m error:`, error.message);
+      console.error(`[${symbol}] ❌ 15m error:`, error.message);
       throw error;
     }
   }
 
-  // Calculate RSI
   calculateRSI(candles, period = 14) {
     if (!candles || candles.length < period + 1) {
       return 50;
@@ -111,7 +129,6 @@ class YahooFinanceService {
     return Math.max(0, Math.min(100, rsi));
   }
 
-  // Calculate SMA
   calculateSMA(candles, period) {
     if (!candles || candles.length < period) {
       return candles?.[0]?.close || 0;
@@ -122,7 +139,6 @@ class YahooFinanceService {
     return sum / period;
   }
 
-  // Get daily volume
   async getDailyVolume(symbol) {
     try {
       const now = Date.now();
@@ -130,7 +146,6 @@ class YahooFinanceService {
 
       if (this.volumeCache[cacheKey] && this.lastDailyFetch[cacheKey] && 
           now - this.lastDailyFetch[cacheKey] < 24 * 60 * 60 * 1000) {
-        console.log(`[${symbol}] Using cached volume`);
         return this.volumeCache[cacheKey];
       }
 
@@ -140,7 +155,6 @@ class YahooFinanceService {
       this.volumeCache[cacheKey] = volume;
       this.lastDailyFetch[cacheKey] = now;
 
-      console.log(`[${symbol}] Volume: ${volume}`);
       return volume;
     } catch (error) {
       console.error(`[${symbol}] Volume error:`, error.message);
@@ -148,7 +162,6 @@ class YahooFinanceService {
     }
   }
 
-  // Get complete analysis
   async getStockAnalysis(candles, symbol) {
     try {
       if (!candles || candles.length === 0) {
@@ -169,7 +182,7 @@ class YahooFinanceService {
         volume: Math.round(volume),
       };
 
-      console.log(`[${symbol}] Analysis complete:`, analysis);
+      console.log(`[${symbol}] ✅ Analysis:`, analysis);
       return analysis;
     } catch (error) {
       console.error(`[${symbol}] Analysis error:`, error.message);
