@@ -21,7 +21,9 @@
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "axios": "^1.4.0",
-    "yahoo-finance2": "^2.8.0"
+    "yahoo-finance2": "^2.8.0",
+    "http-proxy-agent": "^7.0.0",
+    "https-proxy-agent": "^7.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
