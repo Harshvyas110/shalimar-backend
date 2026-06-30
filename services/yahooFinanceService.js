@@ -1,28 +1,11 @@
 const axios = require('axios');
-const { HttpProxyAgent } = require('http-proxy-agent');
-const { HttpsProxyAgent } = require('https-proxy-agent');
+const https = require('https');
 
 class YahooFinanceService {
   constructor() {
     this.volumeCache = {};
     this.lastDailyFetch = {};
-    const user = process.env.PROXY_USER;
-    const pass = process.env.PROXY_PASS;
-    const host = process.env.PROXY_HOST;
-    const port = process.env.PROXY_PORT;
-    if (!user || !pass || !host || !port) {
-      console.error('Missing proxy env vars');
-      this.httpAgent = undefined;
-      this.httpsAgent = undefined;
-      return;
-    }
-    const proxyUrl = 'http://' + user + ':' + pass + '@' + host + ':' + port;
-    this.httpAgent = new HttpProxyAgent(proxyUrl);
-    this.httpsAgent = new HttpsProxyAgent({
-      proxy: proxyUrl,
-      rejectUnauthorized: false
-    });
-    console.log('Proxy initialized');
+    console.log('YahooFinanceService initialized');
   }
 
   async getDailyCandles(symbol) {
@@ -30,16 +13,42 @@ class YahooFinanceService {
       const now = Math.floor(Date.now() / 1000);
       const oneYearAgo = now - (365 * 24 * 60 * 60);
       const url = 'https://query1.finance.yahoo.com/v7/finance/download/' + symbol + '?period1=' + oneYearAgo + '&period2=' + now + '&interval=1d&events=history';
-      const response = await axios.get(url, {
-        httpAgent: this.httpAgent,
-        httpsAgent: this.httpsAgent,
+      
+      const httpsAgent = new https.Agent({
+        rejectUnauthorized: false
+      });
+
+      const config = {
+        httpsAgent: httpsAgent,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         },
         timeout: 15000
-      });
+      };
+
+      const user = process.env.PROXY_USER;
+      const pass = process.env.PROXY_PASS;
+      const host = process.env.PROXY_HOST;
+      const port = process.env.PROXY_PORT;
+
+      if (user && pass && host && port) {
+        config.proxy = {
+          protocol: 'http',
+          host: host,
+          port: parseInt(port),
+          auth: {
+            username: user,
+            password: pass
+          }
+        };
+        console.log('[' + symbol + '] Using proxy');
+      }
+
+      const response = await axios.get(url, config);
       const lines = response.data.split('\n').filter(line => line.trim());
+      
       if (lines.length < 2) throw new Error('No data');
+      
       const quotes = [];
       for (let i = lines.length - 1; i >= 1; i--) {
         const parts = lines[i].split(',');
