@@ -1,43 +1,46 @@
 const axios = require('axios');
+const HttpProxyAgent = require('http-proxy-agent');
+const HttpsProxyAgent = require('https-proxy-agent');
 
 class YahooFinanceService {
   constructor() {
     this.volumeCache = {};
     this.lastDailyFetch = {};
     
-    // Create axios instance with proxy and SSL bypass
-    const proxyUrl = `http://${process.env.PROXY_USER}:${process.env.PROXY_PASS}@${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
+    const user = process.env.PROXY_USER;
+    const pass = process.env.PROXY_PASS;
+    const host = process.env.PROXY_HOST;
+    const port = process.env.PROXY_PORT;
     
-    this.axiosInstance = axios.create({
-      proxy: {
-        protocol: 'http',
-        host: process.env.PROXY_HOST,
-        port: parseInt(process.env.PROXY_PORT),
-        auth: {
-          username: process.env.PROXY_USER,
-          password: process.env.PROXY_PASS
-        }
-      },
-      httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
-      httpAgent: new (require('http').Agent)(),
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-    
-    console.log('✅ Proxy configured');
+    if (!user || !pass || !host || !port) {
+      console.error('❌ Missing proxy env vars');
+      this.httpAgent = undefined;
+      this.httpsAgent = undefined;
+    } else {
+      const proxyUrl = `http://${user}:${pass}@${host}:${port}`;
+      this.httpAgent = new HttpProxyAgent(proxyUrl);
+      this.httpsAgent = new HttpsProxyAgent(proxyUrl);
+      console.log('✅ Proxy initialized');
+    }
   }
 
   async getDailyCandles(symbol) {
     try {
-      console.log(`[${symbol}] Fetching via proxy...`);
+      console.log(`[${symbol}] Fetching...`);
       
       const now = Math.floor(Date.now() / 1000);
       const oneYearAgo = now - (365 * 24 * 60 * 60);
       
       const url = `https://query1.finance.yahoo.com/v7/finance/download/${symbol}?period1=${oneYearAgo}&period2=${now}&interval=1d&events=history`;
       
-      const response = await this.axiosInstance.get(url);
+      const response = await axios.get(url, {
+        httpAgent: this.httpAgent,
+        httpsAgent: this.httpsAgent,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        },
+        timeout: 15000
+      });
 
       const lines = response.data.split('\n').filter(line => line.trim());
       
@@ -60,16 +63,16 @@ class YahooFinanceService {
         }
       }
 
-      console.log(`[${symbol}] ✅ Got ${quotes.length} candles`);
+      console.log(`[${symbol}] ✅ ${quotes.length} candles`);
       return quotes;
     } catch (error) {
-      console.error(`[${symbol}] ❌ Error:`, error.message);
-      throw new Error(`Failed to fetch candles: ${error.message}`);
+      console.error(`[${symbol}] ❌`, error.message);
+      throw error;
     }
   }
 
   async get15MinCandles(symbol) {
-    return await this.getDailyCandles(symbol);
+    return this.getDailyCandles(symbol);
   }
 
   calculateRSI(candles, period = 14) {
