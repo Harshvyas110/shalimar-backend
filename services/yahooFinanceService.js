@@ -18,11 +18,10 @@ class YahooFinanceService {
       this.httpsAgent = undefined;
     } else {
       const proxyUrl = `http://${user}:${pass}@${host}:${port}`;
-      this.httpAgent = new HttpProxyAgent(proxyUrl);
-      this.httpsAgent = new HttpsProxyAgent(proxyUrl);
-      console.log('✅ Proxy initialized');
-    }
-  }
+      this.httpsAgent = new HttpsProxyAgent({
+  proxy: proxyUrl,
+  rejectUnauthorized: false
+});
 
   async getDailyCandles(symbol) {
     try {
