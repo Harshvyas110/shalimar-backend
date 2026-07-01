@@ -33,11 +33,7 @@ class AlphaVantageService {
         const candle = timeSeries[date];
         quotes.push({
           date: date,
-          close: parseFloat(candle['4. close']),
-          open: parseFloat(candle['1. open']),
-          high: parseFloat(candle['2. high']),
-          low: parseFloat(candle['3. low']),
-          volume: parseInt(candle['5. volume'])
+          close: parseFloat(candle['4. close'])
         });
       }
 
