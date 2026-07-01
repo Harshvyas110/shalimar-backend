@@ -6,8 +6,7 @@ const AV_URL = 'https://www.alphavantage.co/query';
 class AlphaVantageService {
   constructor() {
     this.cache = {};
-    this.lastFetch = {};
-    console.log('✅ AlphaVantageService initialized');
+    console.log('✅ AlphaVantageService (Daily Only) initialized');
   }
 
   async getDailyCandles(symbol) {
@@ -46,47 +45,6 @@ class AlphaVantageService {
       return quotes;
     } catch (error) {
       console.error(`[${symbol}] ❌ Daily candles error:`, error.message);
-      throw error;
-    }
-  }
-
-  async get15MinCandles(symbol) {
-    try {
-      console.log(`[${symbol}] Fetching 15-min candles...`);
-      
-      const response = await axios.get(AV_URL, {
-        params: {
-          function: 'TIME_SERIES_INTRADAY',
-          symbol: symbol,
-          interval: '15min',
-          apikey: AV_API_KEY
-        },
-        timeout: 15000
-      });
-
-      if (!response.data['Time Series (15min)']) {
-        throw new Error('No 15-min data returned');
-      }
-
-      const timeSeries = response.data['Time Series (15min)'];
-      const quotes = [];
-
-      for (const timestamp in timeSeries) {
-        const candle = timeSeries[timestamp];
-        quotes.push({
-          time: timestamp,
-          close: parseFloat(candle['4. close']),
-          open: parseFloat(candle['1. open']),
-          high: parseFloat(candle['2. high']),
-          low: parseFloat(candle['3. low']),
-          volume: parseInt(candle['5. volume'])
-        });
-      }
-
-      console.log(`[${symbol}] ✅ Got ${quotes.length} 15-min candles`);
-      return quotes;
-    } catch (error) {
-      console.error(`[${symbol}] ❌ 15-min candles error:`, error.message);
       throw error;
     }
   }
@@ -137,16 +95,15 @@ class AlphaVantageService {
   async getStockAnalysis(symbol) {
     try {
       const dailyCandles = await this.getDailyCandles(symbol);
-      const candles15m = await this.get15MinCandles(symbol);
 
       const sma20 = this.calculateSMA(dailyCandles, 20);
       const sma50 = this.calculateSMA(dailyCandles, 50);
       const sma200 = this.calculateSMA(dailyCandles, 200);
-      const rsi15m = this.calculateRSI(candles15m, 14);
+      const rsi = this.calculateRSI(dailyCandles, 14);
       const currentPrice = dailyCandles[0].close;
 
       const analysis = {
-        rsi: parseFloat(rsi15m.toFixed(2)),
+        rsi: parseFloat(rsi.toFixed(2)),
         sma20: parseFloat(sma20.toFixed(2)),
         sma50: parseFloat(sma50.toFixed(2)),
         sma200: parseFloat(sma200.toFixed(2)),
