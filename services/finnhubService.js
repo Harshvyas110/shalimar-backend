@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY || 'd8o4knpr01qvtr6mh4l0';
+const FINNHUB_API_KEY = 'd929fb9r01qrfbe98gu0d929fb9r01qrfbe98gug';
 const FINNHUB_URL = 'https://finnhub.io/api/v1';
 
 class FinnhubService {
