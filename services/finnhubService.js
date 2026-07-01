@@ -1,39 +1,46 @@
 const axios = require('axios');
 
-const FINNHUB_API_KEY = 'd929fb9r01qrfbe98gu0d929fb9r01qrfbe98gug';
-const FINNHUB_URL = 'https://finnhub.io/api/v1';
+const AV_API_KEY = process.env.AV_API_KEY || 'BS14B59F0QPYKZJY';
+const AV_URL = 'https://www.alphavantage.co/query';
 
-class FinnhubService {
+class AlphaVantageService {
   constructor() {
     this.cache = {};
     this.lastFetch = {};
-    console.log('✅ FinnhubService initialized');
+    console.log('✅ AlphaVantageService initialized');
   }
 
   async getDailyCandles(symbol) {
     try {
       console.log(`[${symbol}] Fetching daily candles...`);
       
-      const response = await axios.get(`${FINNHUB_URL}/stock/candle`, {
+      const response = await axios.get(AV_URL, {
         params: {
+          function: 'TIME_SERIES_DAILY',
           symbol: symbol,
-          resolution: 'D',
-          from: Math.floor(Date.now() / 1000) - (365 * 24 * 60 * 60),
-          to: Math.floor(Date.now() / 1000),
-          token: FINNHUB_API_KEY
+          apikey: AV_API_KEY
         },
-        timeout: 10000
+        timeout: 15000
       });
 
-      if (!response.data.c || response.data.c.length === 0) {
-        throw new Error('No candle data returned');
+      if (!response.data['Time Series (Daily)']) {
+        throw new Error('No daily data returned');
       }
 
-      const closes = response.data.c;
-      const quotes = closes.map((close, i) => ({
-        close: close,
-        volume: response.data.v ? response.data.v[i] : 0
-      }));
+      const timeSeries = response.data['Time Series (Daily)'];
+      const quotes = [];
+
+      for (const date in timeSeries) {
+        const candle = timeSeries[date];
+        quotes.push({
+          date: date,
+          close: parseFloat(candle['4. close']),
+          open: parseFloat(candle['1. open']),
+          high: parseFloat(candle['2. high']),
+          low: parseFloat(candle['3. low']),
+          volume: parseInt(candle['5. volume'])
+        });
+      }
 
       console.log(`[${symbol}] ✅ Got ${quotes.length} daily candles`);
       return quotes;
@@ -47,26 +54,34 @@ class FinnhubService {
     try {
       console.log(`[${symbol}] Fetching 15-min candles...`);
       
-      const response = await axios.get(`${FINNHUB_URL}/stock/candle`, {
+      const response = await axios.get(AV_URL, {
         params: {
+          function: 'TIME_SERIES_INTRADAY',
           symbol: symbol,
-          resolution: '15',
-          from: Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60),
-          to: Math.floor(Date.now() / 1000),
-          token: FINNHUB_API_KEY
+          interval: '15min',
+          apikey: AV_API_KEY
         },
-        timeout: 10000
+        timeout: 15000
       });
 
-      if (!response.data.c || response.data.c.length === 0) {
-        throw new Error('No 15-min candle data');
+      if (!response.data['Time Series (15min)']) {
+        throw new Error('No 15-min data returned');
       }
 
-      const closes = response.data.c;
-      const quotes = closes.map((close, i) => ({
-        close: close,
-        volume: response.data.v ? response.data.v[i] : 0
-      }));
+      const timeSeries = response.data['Time Series (15min)'];
+      const quotes = [];
+
+      for (const timestamp in timeSeries) {
+        const candle = timeSeries[timestamp];
+        quotes.push({
+          time: timestamp,
+          close: parseFloat(candle['4. close']),
+          open: parseFloat(candle['1. open']),
+          high: parseFloat(candle['2. high']),
+          low: parseFloat(candle['3. low']),
+          volume: parseInt(candle['5. volume'])
+        });
+      }
 
       console.log(`[${symbol}] ✅ Got ${quotes.length} 15-min candles`);
       return quotes;
@@ -147,5 +162,4 @@ class FinnhubService {
   }
 }
 
-module.exports = new FinnhubService();
-
+module.exports = new AlphaVantageService();
