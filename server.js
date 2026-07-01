@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const finnhubService = require('./services/finnhubService');
+const avService = require('./services/alphavantageService');
 
 const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT'];
 
@@ -23,7 +23,7 @@ app.get('/api/candles/:symbol', async (req, res) => {
     const symbol = req.params.symbol.toUpperCase();
     console.log(`[API] GET /api/candles/${symbol}`);
     
-    const analysis = await finnhubService.getStockAnalysis(symbol);
+    const analysis = await avService.getStockAnalysis(symbol);
     
     res.json({
       symbol: symbol,
@@ -39,5 +39,5 @@ app.get('/api/candles/:symbol', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📊 Using Finnhub API for stock data`);
+  console.log(`📊 Using Alpha Vantage API for stock data`);
 });
