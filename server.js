@@ -16,27 +16,26 @@ const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM'];
 const CACHE_TTL = 3600000;
 const cache = new Map();
 
-// Rate limit tracking
-const requestQueue = [];
-let lastRequestTime = 0;
-const MIN_REQUEST_DELAY = 12000; // 12 seconds between Alpha Vantage requests (5 req/min = 1 req per 12 sec)
+// Rate limit tracking - INCREASED to 15 seconds (safer)
+const MIN_REQUEST_DELAY = 15000; // 15 seconds = 4 req/min (safer than 5)
+let lastAVRequestTime = 0;
 
 const MOCK_DATA = {
   NVDA: { currentPrice: 200.09, change: 1.23, changePercent: 0.62, dayHigh: 205.12, dayLow: 195.45, dayOpen: 197.32, previousClose: 198.54, rsi: 45.24, sma20: 205.74, sma50: 209.99, sma200: 197.58, volume: 50000000 },
-  AAPL: { currentPrice: 227.84, change: 2.15, changePercent: 0.95, dayHigh: 230.45, dayLow: 225.12, dayOpen: 226.32, previousClose: 225.69, rsi: 52.5, sma20: 225.43, sma50: 220.15, sma200: 215.67, volume: 45000000 },
-  TSLA: { currentPrice: 245.32, change: 3.12, changePercent: 1.29, dayHigh: 248.99, dayLow: 242.15, dayOpen: 243.15, previousClose: 242.20, rsi: 48.7, sma20: 242.15, sma50: 238.90, sma200: 235.43, volume: 35000000 },
-  MSFT: { currentPrice: 423.67, change: 2.45, changePercent: 0.58, dayHigh: 426.45, dayLow: 420.12, dayOpen: 421.32, previousClose: 421.22, rsi: 51.2, sma20: 420.45, sma50: 418.90, sma200: 415.32, volume: 28000000 },
+  AAPL: { currentPrice: 302.84, change: 2.15, changePercent: 0.95, dayHigh: 305.45, dayLow: 300.12, dayOpen: 301.32, previousClose: 300.69, rsi: 52.5, sma20: 300.43, sma50: 295.15, sma200: 290.67, volume: 45000000 },
+  TSLA: { currentPrice: 413.06, change: 3.12, changePercent: 1.29, dayHigh: 416.99, dayLow: 410.15, dayOpen: 411.15, previousClose: 409.94, rsi: 48.7, sma20: 410.15, sma50: 407.90, sma200: 404.43, volume: 35000000 },
+  MSFT: { currentPrice: 386.52, change: 2.45, changePercent: 0.64, dayHigh: 389.45, dayLow: 383.12, dayOpen: 384.32, previousClose: 384.22, rsi: 51.2, sma20: 383.45, sma50: 381.90, sma200: 378.32, volume: 28000000 },
   AMD: { currentPrice: 168.45, change: 1.23, changePercent: 0.74, dayHigh: 170.12, dayLow: 165.32, dayOpen: 166.15, previousClose: 167.22, rsi: 49.3, sma20: 165.32, sma50: 162.15, sma200: 158.90, volume: 32000000 },
   AVGO: { currentPrice: 189.23, change: 0.98, changePercent: 0.52, dayHigh: 191.45, dayLow: 186.55, dayOpen: 187.32, previousClose: 188.25, rsi: 50.1, sma20: 186.55, sma50: 184.32, sma200: 181.67, volume: 15000000 },
   TSM: { currentPrice: 121.56, change: 0.75, changePercent: 0.62, dayHigh: 123.12, dayLow: 119.43, dayOpen: 120.15, previousClose: 120.81, rsi: 48.9, sma20: 119.43, sma50: 117.32, sma200: 115.67, volume: 22000000 },
-  QQQ: { currentPrice: 418.75, change: 2.15, changePercent: 0.52, dayHigh: 420.45, dayLow: 415.42, dayOpen: 416.32, previousClose: 416.60, rsi: 52.3, sma20: 415.42, sma50: 410.88, sma200: 405.21, volume: 15000000 },
-  DIA: { currentPrice: 395.22, change: 1.88, changePercent: 0.48, dayHigh: 397.45, dayLow: 393.55, dayOpen: 394.32, previousClose: 393.34, rsi: 48.9, sma20: 393.55, sma50: 391.12, sma200: 388.45, volume: 18000000 },
-  SPY: { currentPrice: 548.91, change: 2.45, changePercent: 0.45, dayHigh: 551.23, dayLow: 546.33, dayOpen: 547.15, previousClose: 546.46, rsi: 51.2, sma20: 546.33, sma50: 544.67, sma200: 541.89, volume: 25000000 },
+  QQQ: { currentPrice: 729.95, change: 2.15, changePercent: 0.30, dayHigh: 732.45, dayLow: 725.42, dayOpen: 726.32, previousClose: 727.60, rsi: 52.3, sma20: 725.42, sma50: 720.88, sma200: 715.21, volume: 15000000 },
+  DIA: { currentPrice: 526.35, change: 1.88, changePercent: 0.36, dayHigh: 528.45, dayLow: 523.55, dayOpen: 524.32, previousClose: 524.47, rsi: 48.9, sma20: 523.55, sma50: 521.12, sma200: 518.45, volume: 18000000 },
+  SPY: { currentPrice: 750.77, change: 2.45, changePercent: 0.33, dayHigh: 753.23, dayLow: 746.33, dayOpen: 747.15, previousClose: 748.32, rsi: 51.2, sma20: 746.33, sma50: 744.67, sma200: 741.89, volume: 25000000 },
 };
 
 console.log('\n=== SHALIMAR BACKEND ===');
 console.log('Source: Finnhub (quotes) + Alpha Vantage (candles)');
-console.log('Mode: Real data + Rate limit aware + Mock fallback\n');
+console.log('Mode: IMPROVED Rate Limiting (15 sec delays)\n');
 
 function getFromCache(key) {
   const entry = cache.get(key);
@@ -90,15 +89,15 @@ function calculateSMA(candles, period) {
 // Rate-limited Alpha Vantage call
 async function callAlphaVantageWithRateLimit(symbol) {
   const now = Date.now();
-  const timeSinceLastRequest = now - lastRequestTime;
+  const timeSinceLastRequest = now - lastAVRequestTime;
   
   if (timeSinceLastRequest < MIN_REQUEST_DELAY) {
     const waitTime = MIN_REQUEST_DELAY - timeSinceLastRequest;
-    console.log(`[RateLimit] Waiting ${Math.ceil(waitTime/1000)}s before next Alpha Vantage request...`);
+    console.log(`[RateLimit] Waiting ${Math.ceil(waitTime/1000)}s before Alpha Vantage call for ${symbol}...`);
     await new Promise(resolve => setTimeout(resolve, waitTime));
   }
   
-  lastRequestTime = Date.now();
+  lastAVRequestTime = Date.now();
   
   const response = await axios.get(AV_URL, {
     params: {
@@ -116,7 +115,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Backend running',
-    source: 'Finnhub + Alpha Vantage (rate-limited)',
+    source: 'Finnhub + Alpha Vantage (15s rate limiting)',
     cache: { size: cache.size, keys: Array.from(cache.keys()) },
   });
 });
@@ -136,7 +135,7 @@ app.get('/api/candles/:symbol', async (req, res) => {
       return res.json({ symbol, analysis: cached, source: 'cache' });
     }
 
-    console.log(`[API] Getting ${symbol}... (waiting for rate limit)`);
+    console.log(`[API] Getting ${symbol}...`);
 
     try {
       // Get real-time quote from Finnhub
@@ -298,11 +297,12 @@ app.get('/api/cache/info', (req, res) => {
 
 app.post('/api/cache/clear', (req, res) => {
   cache.clear();
+  lastAVRequestTime = 0;
   res.json({ message: 'Cache cleared' });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📊 Finnhub (quotes) + Alpha Vantage (candles, rate-limited)\n`);
+  console.log(`📊 Finnhub + Alpha Vantage (15s rate limiting)\n`);
 });
