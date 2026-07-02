@@ -6,93 +6,46 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const avService = require('./services/alphavantageService');
+const hybridStockService = require('./services/hybridStockService');
 
 const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM'];
-const INDICES = ['QQQ', 'DIA', 'SPY'];
-
-// Mock index data (since Alpha Vantage doesn't support ETFs)
-const mockIndexData = {
-  QQQ: {
-    currentPrice: 418.75,
-    rsi: 52.3,
-    sma20: 415.42,
-    sma50: 410.88,
-    sma200: 405.21,
-    volume: 15000000,
-  },
-  DIA: {
-    currentPrice: 395.22,
-    rsi: 48.9,
-    sma20: 393.55,
-    sma50: 391.12,
-    sma200: 388.45,
-    volume: 18000000,
-  },
-  SPY: {
-    currentPrice: 548.91,
-    rsi: 51.2,
-    sma20: 546.33,
-    sma50: 544.67,
-    sma200: 541.89,
-    volume: 25000000,
-  },
-};
 
 /**
- * Health check endpoint
+ * Health check
  */
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Shalimar Backend is running',
-    cacheInfo: avService.getCacheInfo(),
+    dataSource: 'Finnhub (quotes) + FMP (candles)',
+    cacheInfo: hybridStockService.getCacheInfo(),
   });
 });
 
 /**
- * Get all available stocks
+ * Get available stocks
  */
 app.get('/api/stocks', (req, res) => {
   res.json({
     stocks: STOCKS,
-    indices: INDICES,
-    cacheInfo: avService.getCacheInfo(),
+    dataSource: 'Finnhub + FMP Hybrid',
   });
 });
 
 /**
- * Get candle data and analysis for a symbol
- * Supports both stocks and indices
+ * Get complete stock analysis (quote + candles + indicators)
+ * GET /api/candles/:symbol
  */
 app.get('/api/candles/:symbol', async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
     console.log(`\n[API] GET /api/candles/${symbol}`);
 
-    // Handle indices with mock data
-    if (INDICES.includes(symbol)) {
-      console.log(`[${symbol}] Using mock index data`);
-      return res.json({
-        symbol: symbol,
-        analysis: mockIndexData[symbol],
-        source: 'mock',
-        lastUpdate: new Date().toISOString(),
-        message: 'Index data (mock - Alpha Vantage does not support ETFs)',
-      });
-    }
-
-    // Handle stocks with real Alpha Vantage data
-    if (!STOCKS.includes(symbol) && symbol !== 'NVDA' && symbol !== 'AAPL' && symbol !== 'TSLA' && symbol !== 'MSFT') {
-      console.log(`[${symbol}] Symbol not in whitelist, but attempting to fetch...`);
-    }
-
-    const analysis = await avService.getStockAnalysis(symbol);
+    const analysis = await hybridStockService.getStockAnalysis(symbol);
 
     res.json({
       symbol: symbol,
       analysis: analysis,
-      source: 'alpha-vantage',
       lastUpdate: new Date().toISOString(),
     });
   } catch (error) {
@@ -105,28 +58,101 @@ app.get('/api/candles/:symbol', async (req, res) => {
 });
 
 /**
+ * Get real-time quote only (faster)
+ * GET /api/quote/:symbol
+ */
+app.get('/api/quote/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    console.log(`[API] GET /api/quote/${symbol}`);
+
+    const quote = await hybridStockService.getQuote(symbol);
+
+    res.json({
+      symbol: symbol,
+      quote: quote,
+    });
+  } catch (error) {
+    console.error(`[API] Error:`, error.message);
+    res.status(500).json({
+      error: error.message,
+      symbol: req.params.symbol.toUpperCase(),
+    });
+  }
+});
+
+/**
+ * Get company news
+ * GET /api/news/:symbol
+ */
+app.get('/api/news/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    console.log(`[API] GET /api/news/${symbol}`);
+
+    const news = await hybridStockService.getNews(symbol);
+
+    res.json({
+      symbol: symbol,
+      news: news,
+    });
+  } catch (error) {
+    console.error(`[API] Error:`, error.message);
+    res.status(500).json({
+      error: error.message,
+      symbol: req.params.symbol.toUpperCase(),
+    });
+  }
+});
+
+/**
+ * Get company profile
+ * GET /api/profile/:symbol
+ */
+app.get('/api/profile/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    console.log(`[API] GET /api/profile/${symbol}`);
+
+    const profile = await hybridStockService.getProfile(symbol);
+
+    res.json({
+      symbol: symbol,
+      profile: profile,
+    });
+  } catch (error) {
+    console.error(`[API] Error:`, error.message);
+    res.status(500).json({
+      error: error.message,
+      symbol: req.params.symbol.toUpperCase(),
+    });
+  }
+});
+
+/**
  * Get cache info (for debugging)
+ * GET /api/cache/info
  */
 app.get('/api/cache/info', (req, res) => {
-  res.json(avService.getCacheInfo());
+  res.json(hybridStockService.getCacheInfo());
 });
 
 /**
  * Clear cache (for manual reset)
+ * POST /api/cache/clear
  */
 app.post('/api/cache/clear', (req, res) => {
-  avService.clearAllCache();
+  hybridStockService.clearCache();
   res.json({
     message: 'Cache cleared',
-    cacheInfo: avService.getCacheInfo(),
+    cacheInfo: hybridStockService.getCacheInfo(),
   });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n✅ Server running on port ${PORT}`);
-  console.log(`📊 Using Alpha Vantage API with intelligent caching`);
+  console.log(`📊 Data Source: Finnhub (quotes/news) + FMP (candles)`);
   console.log(`🎯 Supported stocks: ${STOCKS.join(', ')}`);
-  console.log(`📈 Mock indices: ${INDICES.join(', ')}`);
   console.log(`⏱️  Cache TTL: 1 hour\n`);
 });
