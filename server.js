@@ -13,10 +13,14 @@ const FINNHUB_URL = 'https://finnhub.io/api/v1';
 const AV_URL = 'https://www.alphavantage.co/query';
 
 const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM'];
-const CACHE_TTL = 3600000; // 1 hour
+const CACHE_TTL = 3600000;
 const cache = new Map();
 
-// MOCK DATA FALLBACK
+// Rate limit tracking
+const requestQueue = [];
+let lastRequestTime = 0;
+const MIN_REQUEST_DELAY = 12000; // 12 seconds between Alpha Vantage requests (5 req/min = 1 req per 12 sec)
+
 const MOCK_DATA = {
   NVDA: { currentPrice: 200.09, change: 1.23, changePercent: 0.62, dayHigh: 205.12, dayLow: 195.45, dayOpen: 197.32, previousClose: 198.54, rsi: 45.24, sma20: 205.74, sma50: 209.99, sma200: 197.58, volume: 50000000 },
   AAPL: { currentPrice: 227.84, change: 2.15, changePercent: 0.95, dayHigh: 230.45, dayLow: 225.12, dayOpen: 226.32, previousClose: 225.69, rsi: 52.5, sma20: 225.43, sma50: 220.15, sma200: 215.67, volume: 45000000 },
@@ -32,7 +36,7 @@ const MOCK_DATA = {
 
 console.log('\n=== SHALIMAR BACKEND ===');
 console.log('Source: Finnhub (quotes) + Alpha Vantage (candles)');
-console.log('Mode: Real data + Cache + Mock fallback\n');
+console.log('Mode: Real data + Rate limit aware + Mock fallback\n');
 
 function getFromCache(key) {
   const entry = cache.get(key);
@@ -83,11 +87,36 @@ function calculateSMA(candles, period) {
   return closes.reduce((a, b) => a + b, 0) / period;
 }
 
+// Rate-limited Alpha Vantage call
+async function callAlphaVantageWithRateLimit(symbol) {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  
+  if (timeSinceLastRequest < MIN_REQUEST_DELAY) {
+    const waitTime = MIN_REQUEST_DELAY - timeSinceLastRequest;
+    console.log(`[RateLimit] Waiting ${Math.ceil(waitTime/1000)}s before next Alpha Vantage request...`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  lastRequestTime = Date.now();
+  
+  const response = await axios.get(AV_URL, {
+    params: {
+      function: 'TIME_SERIES_DAILY',
+      symbol: symbol,
+      apikey: AV_API_KEY,
+    },
+    timeout: 15000,
+  });
+  
+  return response;
+}
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Backend running',
-    source: 'Finnhub + Alpha Vantage',
+    source: 'Finnhub + Alpha Vantage (rate-limited)',
     cache: { size: cache.size, keys: Array.from(cache.keys()) },
   });
 });
@@ -107,7 +136,7 @@ app.get('/api/candles/:symbol', async (req, res) => {
       return res.json({ symbol, analysis: cached, source: 'cache' });
     }
 
-    console.log(`[API] Getting ${symbol}...`);
+    console.log(`[API] Getting ${symbol}... (waiting for rate limit)`);
 
     try {
       // Get real-time quote from Finnhub
@@ -118,15 +147,8 @@ app.get('/api/candles/:symbol', async (req, res) => {
 
       console.log(`[Finnhub] ✅ Quote for ${symbol}: $${quoteRes.data.c}`);
 
-      // Get historical candles from Alpha Vantage
-      const candleRes = await axios.get(AV_URL, {
-        params: {
-          function: 'TIME_SERIES_DAILY',
-          symbol: symbol,
-          apikey: AV_API_KEY,
-        },
-        timeout: 10000,
-      });
+      // Get historical candles from Alpha Vantage (with rate limiting)
+      const candleRes = await callAlphaVantageWithRateLimit(symbol);
 
       if (!candleRes.data['Time Series (Daily)']) {
         throw new Error('No candles from Alpha Vantage');
@@ -282,5 +304,5 @@ app.post('/api/cache/clear', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📊 Finnhub (quotes) + Alpha Vantage (candles)\n`);
+  console.log(`📊 Finnhub (quotes) + Alpha Vantage (candles, rate-limited)\n`);
 });
