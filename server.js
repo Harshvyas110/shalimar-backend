@@ -8,12 +8,12 @@ app.use(cors());
 app.use(express.json());
 
 const FINNHUB_API_KEY = 'd929fb9r01qrfbe98gu0d929fb9r01qrfbe98gug';
-const FMP_API_KEY = 'A8XCCHUl5cGroCXXvf9gQxpZewiRnVN0';
+const AV_API_KEY = 'BS14B59F0QPYKZJY';
 const FINNHUB_URL = 'https://finnhub.io/api/v1';
-const FMP_URL = 'https://financialmodelingprep.com/api/v3';
+const AV_URL = 'https://www.alphavantage.co/query';
 
 const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM'];
-const CACHE_TTL = 3600000;
+const CACHE_TTL = 3600000; // 1 hour
 const cache = new Map();
 
 // MOCK DATA FALLBACK
@@ -31,7 +31,8 @@ const MOCK_DATA = {
 };
 
 console.log('\n=== SHALIMAR BACKEND ===');
-console.log('Mode: Finnhub + FMP (with fallback)\n');
+console.log('Source: Finnhub (quotes) + Alpha Vantage (candles)');
+console.log('Mode: Real data + Cache + Mock fallback\n');
 
 function getFromCache(key) {
   const entry = cache.get(key);
@@ -86,7 +87,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Backend running',
-    mode: 'Fallback enabled',
+    source: 'Finnhub + Alpha Vantage',
     cache: { size: cache.size, keys: Array.from(cache.keys()) },
   });
 });
@@ -109,31 +110,44 @@ app.get('/api/candles/:symbol', async (req, res) => {
     console.log(`[API] Getting ${symbol}...`);
 
     try {
-      // Try to get real data
+      // Get real-time quote from Finnhub
       const quoteRes = await axios.get(`${FINNHUB_URL}/quote`, {
         params: { symbol, token: FINNHUB_API_KEY },
-        timeout: 5000,
+        timeout: 8000,
       });
 
-      const candleRes = await axios.get(
-        `${FMP_URL}/historical-price-full/${symbol}`,
-        {
-          params: { apikey: FMP_API_KEY },
-          timeout: 5000,
-        }
-      );
+      console.log(`[Finnhub] ✅ Quote for ${symbol}: $${quoteRes.data.c}`);
 
-      if (!candleRes.data.historical || candleRes.data.historical.length === 0) {
-        throw new Error('No candles');
+      // Get historical candles from Alpha Vantage
+      const candleRes = await axios.get(AV_URL, {
+        params: {
+          function: 'TIME_SERIES_DAILY',
+          symbol: symbol,
+          apikey: AV_API_KEY,
+        },
+        timeout: 10000,
+      });
+
+      if (!candleRes.data['Time Series (Daily)']) {
+        throw new Error('No candles from Alpha Vantage');
       }
 
-      const candles = candleRes.data.historical.map((c) => ({
-        close: parseFloat(c.close),
-        open: parseFloat(c.open),
-        high: parseFloat(c.high),
-        low: parseFloat(c.low),
-        volume: parseInt(c.volume),
-      }));
+      const timeSeries = candleRes.data['Time Series (Daily)'];
+      const candles = [];
+
+      for (const date in timeSeries) {
+        const candle = timeSeries[date];
+        candles.push({
+          date: date,
+          close: parseFloat(candle['4. close']),
+          open: parseFloat(candle['1. open']),
+          high: parseFloat(candle['2. high']),
+          low: parseFloat(candle['3. low']),
+          volume: parseInt(candle['5. volume']),
+        });
+      }
+
+      console.log(`[AlphaVantage] ✅ Got ${candles.length} candles for ${symbol}`);
 
       const sma20 = calculateSMA(candles, 20);
       const sma50 = calculateSMA(candles, 50);
@@ -160,8 +174,7 @@ app.get('/api/candles/:symbol', async (req, res) => {
       setCache(cacheKey, analysis);
       res.json({ symbol, analysis, source: 'real' });
     } catch (apiError) {
-      // Fallback to mock data
-      console.log(`[FALLBACK] Using mock data for ${symbol}`);
+      console.log(`[FALLBACK] Using mock data for ${symbol}: ${apiError.message}`);
       const mock = MOCK_DATA[symbol] || MOCK_DATA.NVDA;
       const analysis = {
         symbol,
@@ -189,7 +202,7 @@ app.get('/api/quote/:symbol', async (req, res) => {
     try {
       const response = await axios.get(`${FINNHUB_URL}/quote`, {
         params: { symbol, token: FINNHUB_API_KEY },
-        timeout: 5000,
+        timeout: 8000,
       });
 
       const quote = {
@@ -236,7 +249,7 @@ app.get('/api/news/:symbol', async (req, res) => {
     try {
       const response = await axios.get(`${FINNHUB_URL}/company-news`, {
         params: { symbol, token: FINNHUB_API_KEY, limit: 10 },
-        timeout: 5000,
+        timeout: 8000,
       });
 
       const news = (response.data || []).map((article, idx) => ({
@@ -269,5 +282,5 @@ app.post('/api/cache/clear', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📊 Mode: Real data + Mock fallback\n`);
+  console.log(`📊 Finnhub (quotes) + Alpha Vantage (candles)\n`);
 });
