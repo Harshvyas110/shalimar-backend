@@ -7,35 +7,38 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// API Keys
 const FINNHUB_API_KEY = 'd929fb9r01qrfbe98gu0d929fb9r01qrfbe98gug';
 const AV_API_KEY = 'BS14B59F0QPYKZJY';
+const GOOGLE_SHEET_WEBHOOK = 'https://script.google.com/macros/s/AKfycbwOrOYYPg2Ue_7542BrDJ669_fRoydR_uS5U_leCjhV6FGktI8seNDwDoFFgb42peYZ/exec';
+
 const FINNHUB_URL = 'https://finnhub.io/api/v1';
 const AV_URL = 'https://www.alphavantage.co/query';
 
 const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM'];
-const CACHE_TTL = 3600000;
+const CACHE_TTL = 3600000; // 1 hour
 const cache = new Map();
 
-// Rate limit tracking - INCREASED to 15 seconds (safer)
-const MIN_REQUEST_DELAY = 15000; // 15 seconds = 4 req/min (safer than 5)
+// Rate limit tracking
 let lastAVRequestTime = 0;
+const MIN_REQUEST_DELAY = 15000; // 15 seconds
 
 const MOCK_DATA = {
-  NVDA: { currentPrice: 200.09, change: 1.23, changePercent: 0.62, dayHigh: 205.12, dayLow: 195.45, dayOpen: 197.32, previousClose: 198.54, rsi: 45.24, sma20: 205.74, sma50: 209.99, sma200: 197.58, volume: 50000000 },
+  NVDA: { currentPrice: 194.83, change: -2.75, changePercent: -1.39, dayHigh: 205.12, dayLow: 195.45, dayOpen: 197.32, previousClose: 198.54, rsi: 45.24, sma20: 205.74, sma50: 209.99, sma200: 197.58, volume: 50000000 },
   AAPL: { currentPrice: 302.84, change: 2.15, changePercent: 0.95, dayHigh: 305.45, dayLow: 300.12, dayOpen: 301.32, previousClose: 300.69, rsi: 52.5, sma20: 300.43, sma50: 295.15, sma200: 290.67, volume: 45000000 },
   TSLA: { currentPrice: 413.06, change: 3.12, changePercent: 1.29, dayHigh: 416.99, dayLow: 410.15, dayOpen: 411.15, previousClose: 409.94, rsi: 48.7, sma20: 410.15, sma50: 407.90, sma200: 404.43, volume: 35000000 },
   MSFT: { currentPrice: 386.52, change: 2.45, changePercent: 0.64, dayHigh: 389.45, dayLow: 383.12, dayOpen: 384.32, previousClose: 384.22, rsi: 51.2, sma20: 383.45, sma50: 381.90, sma200: 378.32, volume: 28000000 },
   AMD: { currentPrice: 168.45, change: 1.23, changePercent: 0.74, dayHigh: 170.12, dayLow: 165.32, dayOpen: 166.15, previousClose: 167.22, rsi: 49.3, sma20: 165.32, sma50: 162.15, sma200: 158.90, volume: 32000000 },
   AVGO: { currentPrice: 189.23, change: 0.98, changePercent: 0.52, dayHigh: 191.45, dayLow: 186.55, dayOpen: 187.32, previousClose: 188.25, rsi: 50.1, sma20: 186.55, sma50: 184.32, sma200: 181.67, volume: 15000000 },
   TSM: { currentPrice: 121.56, change: 0.75, changePercent: 0.62, dayHigh: 123.12, dayLow: 119.43, dayOpen: 120.15, previousClose: 120.81, rsi: 48.9, sma20: 119.43, sma50: 117.32, sma200: 115.67, volume: 22000000 },
-  QQQ: { currentPrice: 729.95, change: 2.15, changePercent: 0.30, dayHigh: 732.45, dayLow: 725.42, dayOpen: 726.32, previousClose: 727.60, rsi: 52.3, sma20: 725.42, sma50: 720.88, sma200: 715.21, volume: 15000000 },
-  DIA: { currentPrice: 526.35, change: 1.88, changePercent: 0.36, dayHigh: 528.45, dayLow: 523.55, dayOpen: 524.32, previousClose: 524.47, rsi: 48.9, sma20: 523.55, sma50: 521.12, sma200: 518.45, volume: 18000000 },
-  SPY: { currentPrice: 750.77, change: 2.45, changePercent: 0.33, dayHigh: 753.23, dayLow: 746.33, dayOpen: 747.15, previousClose: 748.32, rsi: 51.2, sma20: 746.33, sma50: 744.67, sma200: 741.89, volume: 25000000 },
+  QQQ: { currentPrice: 730.36, change: 2.15, changePercent: 0.30, dayHigh: 732.45, dayLow: 725.42, dayOpen: 726.32, previousClose: 727.60, rsi: 52.3, sma20: 725.42, sma50: 720.88, sma200: 715.21, volume: 15000000 },
+  DIA: { currentPrice: 525.41, change: 1.88, changePercent: 0.36, dayHigh: 528.45, dayLow: 523.55, dayOpen: 524.32, previousClose: 524.47, rsi: 48.9, sma20: 523.55, sma50: 521.12, sma200: 518.45, volume: 18000000 },
+  SPY: { currentPrice: 750.80, change: 2.45, changePercent: 0.33, dayHigh: 753.23, dayLow: 746.33, dayOpen: 747.15, previousClose: 748.32, rsi: 51.2, sma20: 746.33, sma50: 744.67, sma200: 741.89, volume: 25000000 },
 };
 
 console.log('\n=== SHALIMAR BACKEND ===');
-console.log('Source: Finnhub (quotes) + Alpha Vantage (candles)');
-console.log('Mode: IMPROVED Rate Limiting (15 sec delays)\n');
+console.log('Source: Google Finance (quotes) + Alpha Vantage (candles)');
+console.log('Mode: WORLD-CLASS Real Data Pipeline\n');
 
 function getFromCache(key) {
   const entry = cache.get(key);
@@ -111,11 +114,29 @@ async function callAlphaVantageWithRateLimit(symbol) {
   return response;
 }
 
+// Google Finance data fetch
+async function getGoogleFinanceData(symbol) {
+  try {
+    const response = await axios.get(GOOGLE_SHEET_WEBHOOK, {
+      params: { symbol: symbol.toUpperCase() },
+      timeout: 8000,
+    });
+    
+    if (response.data.status === 'success') {
+      console.log(`[GoogleFinance] ✅ ${symbol}: $${response.data.currentPrice}`);
+      return response.data;
+    }
+  } catch (error) {
+    console.log(`[GoogleFinance] Error: ${error.message}`);
+  }
+  return null;
+}
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'Backend running',
-    source: 'Finnhub + Alpha Vantage (15s rate limiting)',
+    message: 'Shalimar Backend Running',
+    source: 'Google Finance + Alpha Vantage',
     cache: { size: cache.size, keys: Array.from(cache.keys()) },
   });
 });
@@ -138,73 +159,134 @@ app.get('/api/candles/:symbol', async (req, res) => {
     console.log(`[API] Getting ${symbol}...`);
 
     try {
-      // Get real-time quote from Finnhub
+      // TRY GOOGLE FINANCE FIRST (Real Yahoo data)
+      const googleData = await getGoogleFinanceData(symbol);
+      
+      if (googleData && googleData.currentPrice) {
+        // Try to get candles from Alpha Vantage for RSI/SMA
+        let candles = [];
+        try {
+          const candleRes = await callAlphaVantageWithRateLimit(symbol);
+          if (candleRes.data['Time Series (Daily)']) {
+            const timeSeries = candleRes.data['Time Series (Daily)'];
+            for (const date in timeSeries) {
+              const candle = timeSeries[date];
+              candles.push({
+                date: date,
+                close: parseFloat(candle['4. close']),
+                open: parseFloat(candle['1. open']),
+                high: parseFloat(candle['2. high']),
+                low: parseFloat(candle['3. low']),
+                volume: parseInt(candle['5. volume']),
+              });
+            }
+            console.log(`[AlphaVantage] ✅ Got ${candles.length} candles for ${symbol}`);
+          }
+        } catch (avError) {
+          console.log(`[AlphaVantage] Fallback: ${avError.message}`);
+        }
+
+        const sma20 = calculateSMA(candles, 20);
+        const sma50 = calculateSMA(candles, 50);
+        const sma200 = calculateSMA(candles, 200);
+        const rsi = calculateRSI(candles, 14);
+
+        const analysis = {
+          symbol,
+          currentPrice: googleData.currentPrice,
+          change: googleData.change,
+          changePercent: googleData.changePercent,
+          dayHigh: candles[0]?.high || 0,
+          dayLow: candles[0]?.low || 0,
+          dayOpen: candles[0]?.open || 0,
+          previousClose: googleData.currentPrice - googleData.change,
+          rsi: parseFloat(rsi.toFixed(2)),
+          sma20: parseFloat(sma20.toFixed(2)),
+          sma50: parseFloat(sma50.toFixed(2)),
+          sma200: parseFloat(sma200.toFixed(2)),
+          volume: candles[0]?.volume || 0,
+          lastUpdated: new Date().toISOString(),
+        };
+
+        setCache(cacheKey, analysis);
+        return res.json({ symbol, analysis, source: 'google-finance' });
+      }
+    } catch (error) {
+      console.log(`[GoogleFinance] Fallback: ${error.message}`);
+    }
+
+    // FALLBACK TO FINNHUB
+    try {
       const quoteRes = await axios.get(`${FINNHUB_URL}/quote`, {
         params: { symbol, token: FINNHUB_API_KEY },
         timeout: 8000,
       });
 
-      console.log(`[Finnhub] ✅ Quote for ${symbol}: $${quoteRes.data.c}`);
+      if (quoteRes.data.c) {
+        console.log(`[Finnhub] ✅ Quote for ${symbol}: $${quoteRes.data.c}`);
 
-      // Get historical candles from Alpha Vantage (with rate limiting)
-      const candleRes = await callAlphaVantageWithRateLimit(symbol);
+        // Try Alpha Vantage for candles
+        let candles = [];
+        try {
+          const candleRes = await callAlphaVantageWithRateLimit(symbol);
+          if (candleRes.data['Time Series (Daily)']) {
+            const timeSeries = candleRes.data['Time Series (Daily)'];
+            for (const date in timeSeries) {
+              const candle = timeSeries[date];
+              candles.push({
+                date: date,
+                close: parseFloat(candle['4. close']),
+                open: parseFloat(candle['1. open']),
+                high: parseFloat(candle['2. high']),
+                low: parseFloat(candle['3. low']),
+                volume: parseInt(candle['5. volume']),
+              });
+            }
+          }
+        } catch (avError) {
+          console.log(`[AlphaVantage] Skipping: ${avError.message}`);
+        }
 
-      if (!candleRes.data['Time Series (Daily)']) {
-        throw new Error('No candles from Alpha Vantage');
+        const sma20 = calculateSMA(candles, 20);
+        const sma50 = calculateSMA(candles, 50);
+        const sma200 = calculateSMA(candles, 200);
+        const rsi = calculateRSI(candles, 14);
+
+        const analysis = {
+          symbol,
+          currentPrice: quoteRes.data.c,
+          change: quoteRes.data.d,
+          changePercent: quoteRes.data.dp,
+          dayHigh: quoteRes.data.h,
+          dayLow: quoteRes.data.l,
+          dayOpen: quoteRes.data.o,
+          previousClose: quoteRes.data.pc,
+          rsi: parseFloat(rsi.toFixed(2)),
+          sma20: parseFloat(sma20.toFixed(2)),
+          sma50: parseFloat(sma50.toFixed(2)),
+          sma200: parseFloat(sma200.toFixed(2)),
+          volume: candles[0]?.volume || 0,
+          lastUpdated: new Date().toISOString(),
+        };
+
+        setCache(cacheKey, analysis);
+        return res.json({ symbol, analysis, source: 'finnhub' });
       }
-
-      const timeSeries = candleRes.data['Time Series (Daily)'];
-      const candles = [];
-
-      for (const date in timeSeries) {
-        const candle = timeSeries[date];
-        candles.push({
-          date: date,
-          close: parseFloat(candle['4. close']),
-          open: parseFloat(candle['1. open']),
-          high: parseFloat(candle['2. high']),
-          low: parseFloat(candle['3. low']),
-          volume: parseInt(candle['5. volume']),
-        });
-      }
-
-      console.log(`[AlphaVantage] ✅ Got ${candles.length} candles for ${symbol}`);
-
-      const sma20 = calculateSMA(candles, 20);
-      const sma50 = calculateSMA(candles, 50);
-      const sma200 = calculateSMA(candles, 200);
-      const rsi = calculateRSI(candles, 14);
-
-      const analysis = {
-        symbol,
-        currentPrice: quoteRes.data.c,
-        change: quoteRes.data.d,
-        changePercent: quoteRes.data.dp,
-        dayHigh: quoteRes.data.h,
-        dayLow: quoteRes.data.l,
-        dayOpen: quoteRes.data.o,
-        previousClose: quoteRes.data.pc,
-        rsi: parseFloat(rsi.toFixed(2)),
-        sma20: parseFloat(sma20.toFixed(2)),
-        sma50: parseFloat(sma50.toFixed(2)),
-        sma200: parseFloat(sma200.toFixed(2)),
-        volume: candles[0].volume,
-        lastUpdated: new Date().toISOString(),
-      };
-
-      setCache(cacheKey, analysis);
-      res.json({ symbol, analysis, source: 'real' });
-    } catch (apiError) {
-      console.log(`[FALLBACK] Using mock data for ${symbol}: ${apiError.message}`);
-      const mock = MOCK_DATA[symbol] || MOCK_DATA.NVDA;
-      const analysis = {
-        symbol,
-        ...mock,
-        lastUpdated: new Date().toISOString(),
-      };
-      setCache(cacheKey, analysis);
-      res.json({ symbol, analysis, source: 'mock' });
+    } catch (error) {
+      console.log(`[Finnhub] Fallback: ${error.message}`);
     }
+
+    // ULTIMATE FALLBACK TO MOCK
+    console.log(`[FALLBACK] Using mock data for ${symbol}`);
+    const mock = MOCK_DATA[symbol] || MOCK_DATA.NVDA;
+    const analysis = {
+      symbol,
+      ...mock,
+      lastUpdated: new Date().toISOString(),
+    };
+    setCache(cacheKey, analysis);
+    res.json({ symbol, analysis, source: 'mock' });
+
   } catch (error) {
     console.error(`[ERROR] ${req.params.symbol}:`, error.message);
     const mock = MOCK_DATA[req.params.symbol.toUpperCase()] || MOCK_DATA.NVDA;
@@ -221,39 +303,37 @@ app.get('/api/quote/:symbol', async (req, res) => {
     if (cached) return res.json({ symbol, quote: cached, source: 'cache' });
 
     try {
-      const response = await axios.get(`${FINNHUB_URL}/quote`, {
-        params: { symbol, token: FINNHUB_API_KEY },
-        timeout: 8000,
-      });
-
-      const quote = {
-        symbol,
-        currentPrice: response.data.c,
-        change: response.data.d,
-        changePercent: response.data.dp,
-        dayHigh: response.data.h,
-        dayLow: response.data.l,
-        dayOpen: response.data.o,
-        previousClose: response.data.pc,
-      };
-
-      setCache(cacheKey, quote);
-      res.json({ symbol, quote, source: 'real' });
-    } catch {
-      const mock = MOCK_DATA[symbol] || MOCK_DATA.NVDA;
-      const quote = {
-        symbol,
-        currentPrice: mock.currentPrice,
-        change: mock.change,
-        changePercent: mock.changePercent,
-        dayHigh: mock.dayHigh,
-        dayLow: mock.dayLow,
-        dayOpen: mock.dayOpen,
-        previousClose: mock.previousClose,
-      };
-      setCache(cacheKey, quote);
-      res.json({ symbol, quote, source: 'fallback' });
+      // Try Google Finance first
+      const googleData = await getGoogleFinanceData(symbol);
+      if (googleData && googleData.currentPrice) {
+        const quote = {
+          symbol,
+          currentPrice: googleData.currentPrice,
+          change: googleData.change,
+          changePercent: googleData.changePercent,
+        };
+        setCache(cacheKey, quote);
+        return res.json({ symbol, quote, source: 'google-finance' });
+      }
+    } catch (error) {
+      console.log(`[GoogleFinance Quote] Error: ${error.message}`);
     }
+
+    // Fallback to Finnhub
+    const response = await axios.get(`${FINNHUB_URL}/quote`, {
+      params: { symbol, token: FINNHUB_API_KEY },
+      timeout: 8000,
+    });
+
+    const quote = {
+      symbol,
+      currentPrice: response.data.c,
+      change: response.data.d,
+      changePercent: response.data.dp,
+    };
+
+    setCache(cacheKey, quote);
+    res.json({ symbol, quote, source: 'finnhub' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -282,7 +362,7 @@ app.get('/api/news/:symbol', async (req, res) => {
       }));
 
       setCache(cacheKey, news);
-      res.json({ symbol, news, source: 'real' });
+      res.json({ symbol, news, source: 'finnhub' });
     } catch {
       res.json({ symbol, news: [], source: 'fallback' });
     }
@@ -304,5 +384,5 @@ app.post('/api/cache/clear', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📊 Finnhub + Alpha Vantage (15s rate limiting)\n`);
+  console.log(`🌍 Google Finance (Real Yahoo data) + Alpha Vantage\n`);
 });
