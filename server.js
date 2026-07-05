@@ -1,30 +1,18 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
+const { getStockDataWithIndicators } = require('./googleSheetService');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// API Keys
-const FINNHUB_API_KEY = 'd929fb9r01qrfbe98gu0d929fb9r01qrfbe98gug';
-const AV_API_KEY = 'BS14B59F0QPYKZJY';
-const GOOGLE_SHEET_WEBHOOK = 'https://script.google.com/macros/s/AKfycbwOrOYYPg2Ue_7542BrDJ669_fRoydR_uS5U_leCjhV6FGktI8seNDwDoFFgb42peYZ/exec';
-
-const FINNHUB_URL = 'https://finnhub.io/api/v1';
-const AV_URL = 'https://www.alphavantage.co/query';
-
-const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM'];
+const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM', 'QQQ', 'DIA', 'SPY'];
 const CACHE_TTL = 3600000; // 1 hour
 const cache = new Map();
 
-// Rate limit tracking
-let lastAVRequestTime = 0;
-const MIN_REQUEST_DELAY = 15000; // 15 seconds
-
 const MOCK_DATA = {
-  NVDA: { currentPrice: 194.83, change: -2.75, changePercent: -1.39, dayHigh: 205.12, dayLow: 195.45, dayOpen: 197.32, previousClose: 198.54, rsi: 45.24, sma20: 205.74, sma50: 209.99, sma200: 197.58, volume: 50000000 },
+  NVDA: { currentPrice: 194.83, change: -2.75, changePercent: -1.39, dayHigh: 200.12, dayLow: 192.35, dayOpen: 197.14, previousClose: 197.58, rsi: 41.15, sma20: 203.48, sma50: 209.8, sma200: 194.83, volume: 142385548 },
   AAPL: { currentPrice: 302.84, change: 2.15, changePercent: 0.95, dayHigh: 305.45, dayLow: 300.12, dayOpen: 301.32, previousClose: 300.69, rsi: 52.5, sma20: 300.43, sma50: 295.15, sma200: 290.67, volume: 45000000 },
   TSLA: { currentPrice: 413.06, change: 3.12, changePercent: 1.29, dayHigh: 416.99, dayLow: 410.15, dayOpen: 411.15, previousClose: 409.94, rsi: 48.7, sma20: 410.15, sma50: 407.90, sma200: 404.43, volume: 35000000 },
   MSFT: { currentPrice: 386.52, change: 2.45, changePercent: 0.64, dayHigh: 389.45, dayLow: 383.12, dayOpen: 384.32, previousClose: 384.22, rsi: 51.2, sma20: 383.45, sma50: 381.90, sma200: 378.32, volume: 28000000 },
@@ -37,8 +25,8 @@ const MOCK_DATA = {
 };
 
 console.log('\n=== SHALIMAR BACKEND ===');
-console.log('Source: Google Finance (quotes) + Alpha Vantage (candles)');
-console.log('Mode: WORLD-CLASS Real Data Pipeline\n');
+console.log('Source: Google Finance (historical prices)');
+console.log('Calculation: RSI/SMA (calculated locally)\n');
 
 function getFromCache(key) {
   const entry = cache.get(key);
@@ -54,89 +42,11 @@ function setCache(key, data) {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-function calculateRSI(candles, period = 14) {
-  if (!candles || candles.length < period + 1) return 50;
-  const closes = candles.map((c) => c.close).reverse();
-  const changes = [];
-  for (let i = 1; i < closes.length; i++) {
-    changes.push(closes[i] - closes[i - 1]);
-  }
-  let avgGain = 0, avgLoss = 0;
-  for (let i = 0; i < period; i++) {
-    if (changes[i] > 0) avgGain += changes[i];
-    else avgLoss += Math.abs(changes[i]);
-  }
-  avgGain /= period;
-  avgLoss /= period;
-  for (let i = period; i < changes.length; i++) {
-    const change = changes[i];
-    if (change > 0) {
-      avgGain = (avgGain * (period - 1) + change) / period;
-      avgLoss = (avgLoss * (period - 1)) / period;
-    } else {
-      avgGain = (avgGain * (period - 1)) / period;
-      avgLoss = (avgLoss * (period - 1) + Math.abs(change)) / period;
-    }
-  }
-  const rs = avgGain / avgLoss;
-  const rsi = 100 - (100 / (1 + rs));
-  return Math.max(0, Math.min(100, rsi));
-}
-
-function calculateSMA(candles, period) {
-  if (!candles || candles.length < period) return candles && candles[0] ? candles[0].close : 0;
-  const closes = candles.map((c) => c.close).slice(0, period);
-  return closes.reduce((a, b) => a + b, 0) / period;
-}
-
-// Rate-limited Alpha Vantage call
-async function callAlphaVantageWithRateLimit(symbol) {
-  const now = Date.now();
-  const timeSinceLastRequest = now - lastAVRequestTime;
-  
-  if (timeSinceLastRequest < MIN_REQUEST_DELAY) {
-    const waitTime = MIN_REQUEST_DELAY - timeSinceLastRequest;
-    console.log(`[RateLimit] Waiting ${Math.ceil(waitTime/1000)}s before Alpha Vantage call for ${symbol}...`);
-    await new Promise(resolve => setTimeout(resolve, waitTime));
-  }
-  
-  lastAVRequestTime = Date.now();
-  
-  const response = await axios.get(AV_URL, {
-    params: {
-      function: 'TIME_SERIES_DAILY',
-      symbol: symbol,
-      apikey: AV_API_KEY,
-    },
-    timeout: 15000,
-  });
-  
-  return response;
-}
-
-// Google Finance data fetch
-async function getGoogleFinanceData(symbol) {
-  try {
-    const response = await axios.get(GOOGLE_SHEET_WEBHOOK, {
-      params: { symbol: symbol.toUpperCase() },
-      timeout: 8000,
-    });
-    
-    if (response.data.status === 'success') {
-      console.log(`[GoogleFinance] ✅ ${symbol}: $${response.data.currentPrice}`);
-      return response.data;
-    }
-  } catch (error) {
-    console.log(`[GoogleFinance] Error: ${error.message}`);
-  }
-  return null;
-}
-
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Shalimar Backend Running',
-    source: 'Google Finance + Alpha Vantage',
+    source: 'Google Finance + Calculated Indicators',
     cache: { size: cache.size, keys: Array.from(cache.keys()) },
   });
 });
@@ -148,8 +58,9 @@ app.get('/api/stocks', (req, res) => {
 app.get('/api/candles/:symbol', async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    const cacheKey = `analysis_${symbol}`;
+    const cacheKey = `stock_${symbol}`;
 
+    // Check cache first
     const cached = getFromCache(cacheKey);
     if (cached) {
       console.log(`[CACHE] HIT: ${symbol}`);
@@ -159,130 +70,24 @@ app.get('/api/candles/:symbol', async (req, res) => {
     console.log(`[API] Getting ${symbol}...`);
 
     try {
-      // TRY GOOGLE FINANCE FIRST (Real Yahoo data)
-      const googleData = await getGoogleFinanceData(symbol);
-      
-      if (googleData && googleData.currentPrice) {
-        // Try to get candles from Alpha Vantage for RSI/SMA
-        let candles = [];
-        try {
-          const candleRes = await callAlphaVantageWithRateLimit(symbol);
-          if (candleRes.data['Time Series (Daily)']) {
-            const timeSeries = candleRes.data['Time Series (Daily)'];
-            for (const date in timeSeries) {
-              const candle = timeSeries[date];
-              candles.push({
-                date: date,
-                close: parseFloat(candle['4. close']),
-                open: parseFloat(candle['1. open']),
-                high: parseFloat(candle['2. high']),
-                low: parseFloat(candle['3. low']),
-                volume: parseInt(candle['5. volume']),
-              });
-            }
-            console.log(`[AlphaVantage] ✅ Got ${candles.length} candles for ${symbol}`);
-          }
-        } catch (avError) {
-          console.log(`[AlphaVantage] Fallback: ${avError.message}`);
-        }
+      // Get data from Google Finance (with calculated RSI/SMA)
+      const analysis = await getStockDataWithIndicators(symbol);
 
-        const sma20 = calculateSMA(candles, 20);
-        const sma50 = calculateSMA(candles, 50);
-        const sma200 = calculateSMA(candles, 200);
-        const rsi = calculateRSI(candles, 14);
-
-        const analysis = {
-          symbol,
-          currentPrice: googleData.currentPrice,
-          change: googleData.change,
-          changePercent: googleData.changePercent,
-          dayHigh: candles[0]?.high || 0,
-          dayLow: candles[0]?.low || 0,
-          dayOpen: candles[0]?.open || 0,
-          previousClose: googleData.currentPrice - googleData.change,
-          rsi: parseFloat(rsi.toFixed(2)),
-          sma20: parseFloat(sma20.toFixed(2)),
-          sma50: parseFloat(sma50.toFixed(2)),
-          sma200: parseFloat(sma200.toFixed(2)),
-          volume: candles[0]?.volume || 0,
-          lastUpdated: new Date().toISOString(),
-        };
-
+      if (analysis) {
         setCache(cacheKey, analysis);
-        return res.json({ symbol, analysis, source: 'google-finance' });
+        return res.json({ symbol, analysis, source: 'google-finance-calculated' });
       }
     } catch (error) {
-      console.log(`[GoogleFinance] Fallback: ${error.message}`);
+      console.log(`[GoogleFinance] Error: ${error.message}`);
     }
 
-    // FALLBACK TO FINNHUB
-    try {
-      const quoteRes = await axios.get(`${FINNHUB_URL}/quote`, {
-        params: { symbol, token: FINNHUB_API_KEY },
-        timeout: 8000,
-      });
-
-      if (quoteRes.data.c) {
-        console.log(`[Finnhub] ✅ Quote for ${symbol}: $${quoteRes.data.c}`);
-
-        // Try Alpha Vantage for candles
-        let candles = [];
-        try {
-          const candleRes = await callAlphaVantageWithRateLimit(symbol);
-          if (candleRes.data['Time Series (Daily)']) {
-            const timeSeries = candleRes.data['Time Series (Daily)'];
-            for (const date in timeSeries) {
-              const candle = timeSeries[date];
-              candles.push({
-                date: date,
-                close: parseFloat(candle['4. close']),
-                open: parseFloat(candle['1. open']),
-                high: parseFloat(candle['2. high']),
-                low: parseFloat(candle['3. low']),
-                volume: parseInt(candle['5. volume']),
-              });
-            }
-          }
-        } catch (avError) {
-          console.log(`[AlphaVantage] Skipping: ${avError.message}`);
-        }
-
-        const sma20 = calculateSMA(candles, 20);
-        const sma50 = calculateSMA(candles, 50);
-        const sma200 = calculateSMA(candles, 200);
-        const rsi = calculateRSI(candles, 14);
-
-        const analysis = {
-          symbol,
-          currentPrice: quoteRes.data.c,
-          change: quoteRes.data.d,
-          changePercent: quoteRes.data.dp,
-          dayHigh: quoteRes.data.h,
-          dayLow: quoteRes.data.l,
-          dayOpen: quoteRes.data.o,
-          previousClose: quoteRes.data.pc,
-          rsi: parseFloat(rsi.toFixed(2)),
-          sma20: parseFloat(sma20.toFixed(2)),
-          sma50: parseFloat(sma50.toFixed(2)),
-          sma200: parseFloat(sma200.toFixed(2)),
-          volume: candles[0]?.volume || 0,
-          lastUpdated: new Date().toISOString(),
-        };
-
-        setCache(cacheKey, analysis);
-        return res.json({ symbol, analysis, source: 'finnhub' });
-      }
-    } catch (error) {
-      console.log(`[Finnhub] Fallback: ${error.message}`);
-    }
-
-    // ULTIMATE FALLBACK TO MOCK
+    // FALLBACK to mock data
     console.log(`[FALLBACK] Using mock data for ${symbol}`);
     const mock = MOCK_DATA[symbol] || MOCK_DATA.NVDA;
     const analysis = {
       symbol,
       ...mock,
-      lastUpdated: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
     };
     setCache(cacheKey, analysis);
     res.json({ symbol, analysis, source: 'mock' });
@@ -303,71 +108,24 @@ app.get('/api/quote/:symbol', async (req, res) => {
     if (cached) return res.json({ symbol, quote: cached, source: 'cache' });
 
     try {
-      // Try Google Finance first
-      const googleData = await getGoogleFinanceData(symbol);
-      if (googleData && googleData.currentPrice) {
+      const data = await getStockDataWithIndicators(symbol);
+      if (data) {
         const quote = {
           symbol,
-          currentPrice: googleData.currentPrice,
-          change: googleData.change,
-          changePercent: googleData.changePercent,
+          currentPrice: data.currentPrice,
+          change: data.change,
+          changePercent: data.changePercent,
         };
         setCache(cacheKey, quote);
         return res.json({ symbol, quote, source: 'google-finance' });
       }
     } catch (error) {
-      console.log(`[GoogleFinance Quote] Error: ${error.message}`);
+      console.log(`Error: ${error.message}`);
     }
 
-    // Fallback to Finnhub
-    const response = await axios.get(`${FINNHUB_URL}/quote`, {
-      params: { symbol, token: FINNHUB_API_KEY },
-      timeout: 8000,
-    });
-
-    const quote = {
-      symbol,
-      currentPrice: response.data.c,
-      change: response.data.d,
-      changePercent: response.data.dp,
-    };
-
-    setCache(cacheKey, quote);
-    res.json({ symbol, quote, source: 'finnhub' });
+    res.status(500).json({ error: 'Unable to fetch quote' });
   } catch (error) {
     res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/news/:symbol', async (req, res) => {
-  try {
-    const symbol = req.params.symbol.toUpperCase();
-    const cacheKey = `news_${symbol}`;
-
-    const cached = getFromCache(cacheKey);
-    if (cached) return res.json({ symbol, news: cached, source: 'cache' });
-
-    try {
-      const response = await axios.get(`${FINNHUB_URL}/company-news`, {
-        params: { symbol, token: FINNHUB_API_KEY, limit: 10 },
-        timeout: 8000,
-      });
-
-      const news = (response.data || []).map((article, idx) => ({
-        id: `${symbol}-${idx}`,
-        headline: article.headline,
-        summary: article.summary,
-        source: article.source,
-        url: article.url,
-      }));
-
-      setCache(cacheKey, news);
-      res.json({ symbol, news, source: 'finnhub' });
-    } catch {
-      res.json({ symbol, news: [], source: 'fallback' });
-    }
-  } catch (error) {
-    res.json({ symbol: req.params.symbol, news: [], error: error.message });
   }
 });
 
@@ -377,12 +135,11 @@ app.get('/api/cache/info', (req, res) => {
 
 app.post('/api/cache/clear', (req, res) => {
   cache.clear();
-  lastAVRequestTime = 0;
   res.json({ message: 'Cache cleared' });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌍 Google Finance (Real Yahoo data) + Alpha Vantage\n`);
+  console.log(`🌍 Google Finance + Local RSI/SMA Calculation\n`);
 });
