@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM', 'QQQ', 'DIA', 'SPY'];
-const CACHE_TTL = 3600000; // 1 hour
+const CACHE_TTL = 900000; // 15 minutes (instead of 1 hour)
 const cache = new Map();
 
 const MOCK_DATA = {
@@ -26,7 +26,9 @@ const MOCK_DATA = {
 
 console.log('\n=== SHALIMAR BACKEND ===');
 console.log('Source: Google Finance (historical prices)');
-console.log('Calculation: RSI/SMA (calculated locally)\n');
+console.log('Calculation: RSI/SMA (calculated locally)');
+console.log('Cache TTL: 15 minutes');
+console.log('Refresh every: 15 minutes\n');
 
 function getFromCache(key) {
   const entry = cache.get(key);
@@ -48,6 +50,7 @@ app.get('/health', (req, res) => {
     message: 'Shalimar Backend Running',
     source: 'Google Finance + Calculated Indicators',
     cache: { size: cache.size, keys: Array.from(cache.keys()) },
+    cacheTTL: '15 minutes',
   });
 });
 
@@ -139,7 +142,12 @@ app.get('/api/news/:symbol', async (req, res) => {
 });
 
 app.get('/api/cache/info', (req, res) => {
-  res.json({ size: cache.size, keys: Array.from(cache.keys()) });
+  res.json({ 
+    size: cache.size, 
+    keys: Array.from(cache.keys()),
+    cacheTTL: '15 minutes',
+    refreshSchedule: 'Every 15 minutes'
+  });
 });
 
 app.post('/api/cache/clear', (req, res) => {
@@ -150,5 +158,6 @@ app.post('/api/cache/clear', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌍 Google Finance + Local RSI/SMA Calculation\n`);
+  console.log(`🌍 Google Finance + Local RSI/SMA Calculation`);
+  console.log(`⏱️  Refresh: Every 15 minutes\n`);
 });
