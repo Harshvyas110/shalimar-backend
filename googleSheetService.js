@@ -19,7 +19,7 @@ async function getStockDataWithIndicators(symbol) {
     const closingPrices = response.data.closingPrices || [];
     
     if (closingPrices.length < 14) {
-      throw new Error('Not enough historical data');
+      throw new Error(`Not enough historical data. Got ${closingPrices.length}, need at least 14`);
     }
 
     // Calculate indicators
@@ -39,11 +39,11 @@ async function getStockDataWithIndicators(symbol) {
       sma20: parseFloat(sma20.toFixed(2)),
       sma50: parseFloat(sma50.toFixed(2)),
       sma200: parseFloat(sma200.toFixed(2)),
-      volume: response.data.historicalData[0]?.volume || 0,
-      dayHigh: response.data.historicalData[0]?.high || 0,
-      dayLow: response.data.historicalData[0]?.low || 0,
-      dayOpen: response.data.historicalData[0]?.open || 0,
-      previousClose: response.data.previousClose || response.data.currentPrice,
+      volume: 0,
+      dayHigh: 0,
+      dayLow: 0,
+      dayOpen: 0,
+      previousClose: response.data.currentPrice - response.data.change,
       source: 'google-finance-calculated',
       timestamp: new Date().toISOString(),
     };
