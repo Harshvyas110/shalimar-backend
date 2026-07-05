@@ -9,7 +9,7 @@ async function getStockDataWithIndicators(symbol) {
     
     const response = await axios.get(GOOGLE_SHEET_WEBHOOK, {
       params: { symbol: symbol.toUpperCase() },
-      timeout: 10000,
+      timeout: 30000, // 30 seconds (increased from 10 to handle slow Google Sheets)
     });
 
     if (response.data.status !== 'success') {
@@ -28,22 +28,22 @@ async function getStockDataWithIndicators(symbol) {
     const sma50 = calculateSMA(closingPrices, 50);
     const sma200 = calculateSMA(closingPrices, 200);
 
-    console.log(`[GoogleSheet] ✅ ${symbol}: Price=$${response.data.currentPrice}, RSI=${rsi.toFixed(2)}`);
+    console.log(`[GoogleSheet] ✅ ${symbol}: Price=$${response.data.currentPrice}, Change=$${response.data.change} (${response.data.changePercent}%), RSI=${rsi.toFixed(2)}`);
 
     return {
       symbol: response.data.symbol,
       currentPrice: response.data.currentPrice,
       change: response.data.change,
       changePercent: response.data.changePercent,
+      dayHigh: response.data.dayHigh,
+      dayLow: response.data.dayLow,
+      dayOpen: response.data.dayOpen,
+      previousClose: response.data.currentPrice - response.data.change,
       rsi: parseFloat(rsi.toFixed(2)),
       sma20: parseFloat(sma20.toFixed(2)),
       sma50: parseFloat(sma50.toFixed(2)),
       sma200: parseFloat(sma200.toFixed(2)),
-      volume: 0,
-      dayHigh: 0,
-      dayLow: 0,
-      dayOpen: 0,
-      previousClose: response.data.currentPrice - response.data.change,
+      volume: response.data.volume,
       source: 'google-finance-calculated',
       timestamp: new Date().toISOString(),
     };
