@@ -12,7 +12,7 @@ const CACHE_TTL = 3600000; // 1 hour
 const cache = new Map();
 
 const MOCK_DATA = {
-  NVDA: { currentPrice: 194.83, change: -2.75, changePercent: -1.39, dayHigh: 200.12, dayLow: 192.35, dayOpen: 197.14, previousClose: 197.58, rsi: 41.15, sma20: 203.48, sma50: 209.8, sma200: 194.83, volume: 142385548 },
+  NVDA: { currentPrice: 194.83, change: -2.75, changePercent: -1.39, dayHigh: 200.12, dayLow: 192.35, dayOpen: 197.14, previousClose: 197.58, rsi: 40.71, sma20: 203.48, sma50: 209.8, sma200: 194.83, volume: 142385548 },
   AAPL: { currentPrice: 302.84, change: 2.15, changePercent: 0.95, dayHigh: 305.45, dayLow: 300.12, dayOpen: 301.32, previousClose: 300.69, rsi: 52.5, sma20: 300.43, sma50: 295.15, sma200: 290.67, volume: 45000000 },
   TSLA: { currentPrice: 413.06, change: 3.12, changePercent: 1.29, dayHigh: 416.99, dayLow: 410.15, dayOpen: 411.15, previousClose: 409.94, rsi: 48.7, sma20: 410.15, sma50: 407.90, sma200: 404.43, volume: 35000000 },
   MSFT: { currentPrice: 386.52, change: 2.45, changePercent: 0.64, dayHigh: 389.45, dayLow: 383.12, dayOpen: 384.32, previousClose: 384.22, rsi: 51.2, sma20: 383.45, sma50: 381.90, sma200: 378.32, volume: 28000000 },
@@ -126,6 +126,15 @@ app.get('/api/quote/:symbol', async (req, res) => {
     res.status(500).json({ error: 'Unable to fetch quote' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/news/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    res.json({ symbol, news: [], source: 'fallback' });
+  } catch (error) {
+    res.json({ symbol: req.params.symbol, news: [], error: error.message });
   }
 });
 
