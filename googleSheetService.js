@@ -9,26 +9,29 @@ async function getStockDataWithIndicators(symbol) {
     
     const response = await axios.get(GOOGLE_SHEET_WEBHOOK, {
       params: { symbol: symbol.toUpperCase() },
-      timeout: 30000, // 30 seconds (increased from 10 to handle slow Google Sheets)
+      timeout: 30000,
     });
 
     if (response.data.status !== 'success') {
-      throw new Error('Google Sheet returned error');
+      throw new Error('Google Sheet returned error: ' + response.data.message);
     }
 
-    const closingPrices = response.data.closingPrices || [];
+    let closingPrices = response.data.closingPrices || [];
     
     if (closingPrices.length < 14) {
-      throw new Error(`Not enough historical data. Got ${closingPrices.length}, need at least 14`);
+      throw new Error(`Not enough data. Got ${closingPrices.length}, need 14`);
     }
 
-    // Calculate indicators
+    // ✅ FIX: REVERSE the array so newest comes FIRST
+    closingPrices = closingPrices.reverse();
+
+    // Calculate indicators from REVERSED (newest first) data
     const rsi = calculateRSI(closingPrices, 14);
     const sma20 = calculateSMA(closingPrices, 20);
     const sma50 = calculateSMA(closingPrices, 50);
     const sma200 = calculateSMA(closingPrices, 200);
 
-    console.log(`[GoogleSheet] ✅ ${symbol}: Price=$${response.data.currentPrice}, Change=$${response.data.change} (${response.data.changePercent}%), RSI=${rsi.toFixed(2)}`);
+    console.log(`[${symbol}] ✅ Price=$${response.data.currentPrice}, SMA20=$${sma20.toFixed(2)}, SMA50=$${sma50.toFixed(2)}, SMA200=$${sma200.toFixed(2)}`);
 
     return {
       symbol: response.data.symbol,
@@ -48,32 +51,35 @@ async function getStockDataWithIndicators(symbol) {
       timestamp: new Date().toISOString(),
     };
   } catch (error) {
-    console.error(`[GoogleSheet] Error for ${symbol}:`, error.message);
+    console.error(`[${symbol}] Error:`, error.message);
     return null;
   }
 }
 
 // Calculate Simple Moving Average
+// prices array should be NEWEST FIRST!
 function calculateSMA(prices, period) {
   if (!prices || prices.length < period) {
     return prices && prices.length > 0 ? prices[0] : 0;
   }
 
+  // Take the first N prices (which are newest!)
   const relevantPrices = prices.slice(0, period);
   const sum = relevantPrices.reduce((a, b) => a + b, 0);
   return sum / period;
 }
 
 // Calculate Relative Strength Index
+// prices array should be NEWEST FIRST!
 function calculateRSI(prices, period = 14) {
   if (!prices || prices.length < period + 1) {
-    return 50; // Default neutral RSI
+    return 50;
   }
 
-  // Calculate price changes
+  // Calculate price changes (newest to oldest)
   const changes = [];
-  for (let i = 1; i < prices.length; i++) {
-    changes.push(prices[i] - prices[i - 1]);
+  for (let i = 0; i < prices.length - 1; i++) {
+    changes.push(prices[i] - prices[i + 1]);
   }
 
   // Calculate initial gains and losses
@@ -107,7 +113,7 @@ function calculateRSI(prices, period = 14) {
   const rs = avgGain / avgLoss;
   const rsi = 100 - (100 / (1 + rs));
 
-  return Math.max(0, Math.min(100, rsi)); // Clamp between 0-100
+  return Math.max(0, Math.min(100, rsi));
 }
 
 module.exports = { getStockDataWithIndicators };
