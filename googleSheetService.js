@@ -22,7 +22,7 @@ async function getStockDataWithIndicators(symbol) {
       throw new Error(`Not enough data. Got ${closingPrices.length}, need 14`);
     }
 
-    // ✅ FIX: REVERSE the array so newest comes FIRST
+    // ✅ CRITICAL: REVERSE the array so newest comes FIRST
     closingPrices = closingPrices.reverse();
 
     // Calculate indicators from REVERSED (newest first) data
