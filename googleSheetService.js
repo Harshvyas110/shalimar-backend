@@ -21,11 +21,9 @@ async function getStockDataWithIndicators(symbol) {
       throw new Error(`Not enough data: ${closingPrices.length} prices`);
     }
 
-    console.log(`[${symbol}] Got ${closingPrices.length} prices, first=${closingPrices[0]}, last=${closingPrices[closingPrices.length-1]}`);
-
-    // DON'T REVERSE - Google Sheets already returns oldest to newest!
-    // We'll use slice(-period) to get the LAST N prices (which are newest)
-
+    // Google Sheets returns NEWEST FIRST! So closingPrices[0] is today's close
+    // Don't reverse! Just use the first N prices for SMA
+    
     const rsi = calculateRSI(closingPrices, 14);
     const sma20 = calculateSMA(closingPrices, 20);
     const sma50 = calculateSMA(closingPrices, 50);
@@ -58,26 +56,27 @@ async function getStockDataWithIndicators(symbol) {
   }
 }
 
-// Calculate SMA - take LAST N prices (which are newest since array is oldest-first)
+// Calculate SMA - closingPrices is NEWEST FIRST
+// So take first N prices which are the most recent
 function calculateSMA(prices, period) {
   if (!prices || prices.length < period) {
-    return prices && prices.length > 0 ? prices[prices.length - 1] : 0;
+    return prices && prices.length > 0 ? prices[0] : 0;
   }
 
-  // Get the LAST N prices (newest)
-  const relevantPrices = prices.slice(-period);
+  // Take FIRST N prices (which are newest!)
+  const relevantPrices = prices.slice(0, period);
   const sum = relevantPrices.reduce((a, b) => a + b, 0);
   return sum / period;
 }
 
-// Calculate RSI - prices array is oldest-first, so we work backwards
+// Calculate RSI - closingPrices is NEWEST FIRST
 function calculateRSI(prices, period = 14) {
   if (!prices || prices.length < period + 1) {
     return 50;
   }
 
-  // Get the LAST N+1 prices (newest)
-  const recentPrices = prices.slice(-(period + 1));
+  // Take FIRST N+1 prices (newest first!)
+  const recentPrices = prices.slice(0, period + 1);
   
   // Calculate changes (newest to oldest)
   const changes = [];
