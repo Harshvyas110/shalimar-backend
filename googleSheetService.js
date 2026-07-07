@@ -21,11 +21,11 @@ async function getStockDataWithIndicators(symbol) {
       throw new Error(`Not enough data: ${closingPrices.length} prices`);
     }
 
-    // REVERSE array - Google Sheets returns oldest first, we need newest first
-    closingPrices = closingPrices.reverse();
-    console.log(`[${symbol}] Reversed: ${closingPrices.length} prices, newest=${closingPrices[0]}, oldest=${closingPrices[closingPrices.length-1]}`);
+    console.log(`[${symbol}] Got ${closingPrices.length} prices, first=${closingPrices[0]}, last=${closingPrices[closingPrices.length-1]}`);
 
-    // Calculate all indicators from reversed array
+    // DON'T REVERSE - Google Sheets already returns oldest to newest!
+    // We'll use slice(-period) to get the LAST N prices (which are newest)
+
     const rsi = calculateRSI(closingPrices, 14);
     const sma20 = calculateSMA(closingPrices, 20);
     const sma50 = calculateSMA(closingPrices, 50);
@@ -58,27 +58,31 @@ async function getStockDataWithIndicators(symbol) {
   }
 }
 
-// Calculate SMA - prices array MUST be newest first!
+// Calculate SMA - take LAST N prices (which are newest since array is oldest-first)
 function calculateSMA(prices, period) {
   if (!prices || prices.length < period) {
-    return prices && prices.length > 0 ? prices[0] : 0;
+    return prices && prices.length > 0 ? prices[prices.length - 1] : 0;
   }
 
-  const relevantPrices = prices.slice(0, period);
+  // Get the LAST N prices (newest)
+  const relevantPrices = prices.slice(-period);
   const sum = relevantPrices.reduce((a, b) => a + b, 0);
   return sum / period;
 }
 
-// Calculate RSI - prices array MUST be newest first!
+// Calculate RSI - prices array is oldest-first, so we work backwards
 function calculateRSI(prices, period = 14) {
   if (!prices || prices.length < period + 1) {
     return 50;
   }
 
-  // Calculate changes newest to oldest
+  // Get the LAST N+1 prices (newest)
+  const recentPrices = prices.slice(-(period + 1));
+  
+  // Calculate changes (newest to oldest)
   const changes = [];
-  for (let i = 0; i < prices.length - 1; i++) {
-    changes.push(prices[i] - prices[i + 1]);
+  for (let i = 0; i < recentPrices.length - 1; i++) {
+    changes.push(recentPrices[i] - recentPrices[i + 1]);
   }
 
   let gains = 0;
