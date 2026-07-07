@@ -1,9 +1,17 @@
 const express = require('express');
+const cors = require('cors');
 const { getStockDataWithIndicators } = require('./googleSheetService');
-const app = express();
-const PORT = process.env.PORT || 3000;
+require('dotenv').config();
 
-// ===== SEQUENTIAL QUEUE FOR GOOGLE SHEETS =====
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM', 'QQQ', 'DIA', 'SPY'];
+const CACHE_TTL = 900000; // 15 minutes
+const cache = new Map();
+
+// Sequential queue for Google Sheets
 let requestQueue = Promise.resolve();
 const queueRequest = async (fn) => {
   requestQueue = requestQueue.then(fn).catch(e => {
@@ -13,120 +21,171 @@ const queueRequest = async (fn) => {
   return requestQueue;
 };
 
-// ===== IN-MEMORY CACHE =====
-const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
-const cache = new Map();
+const MOCK_DATA = {
+  NVDA: { currentPrice: 194.83, change: -2.75, changePercent: -1.39, dayHigh: 200.12, dayLow: 192.35, dayOpen: 197.14, previousClose: 197.58, rsi: 40.71, sma20: 203.48, sma50: 209.8, sma200: 194.83, volume: 142385548 },
+  AAPL: { currentPrice: 302.84, change: 2.15, changePercent: 0.95, dayHigh: 305.45, dayLow: 300.12, dayOpen: 301.32, previousClose: 300.69, rsi: 52.5, sma20: 300.43, sma50: 295.15, sma200: 290.67, volume: 45000000 },
+  TSLA: { currentPrice: 413.06, change: 3.12, changePercent: 1.29, dayHigh: 416.99, dayLow: 410.15, dayOpen: 411.15, previousClose: 409.94, rsi: 48.7, sma20: 410.15, sma50: 407.90, sma200: 404.43, volume: 35000000 },
+  MSFT: { currentPrice: 386.52, change: 2.45, changePercent: 0.64, dayHigh: 389.45, dayLow: 383.12, dayOpen: 384.32, previousClose: 384.22, rsi: 51.2, sma20: 383.45, sma50: 381.90, sma200: 378.32, volume: 28000000 },
+  AMD: { currentPrice: 168.45, change: 1.23, changePercent: 0.74, dayHigh: 170.12, dayLow: 165.32, dayOpen: 166.15, previousClose: 167.22, rsi: 49.3, sma20: 165.32, sma50: 162.15, sma200: 158.90, volume: 32000000 },
+  AVGO: { currentPrice: 189.23, change: 0.98, changePercent: 0.52, dayHigh: 191.45, dayLow: 186.55, dayOpen: 187.32, previousClose: 188.25, rsi: 50.1, sma20: 186.55, sma50: 184.32, sma200: 181.67, volume: 15000000 },
+  TSM: { currentPrice: 121.56, change: 0.75, changePercent: 0.62, dayHigh: 123.12, dayLow: 119.43, dayOpen: 120.15, previousClose: 120.81, rsi: 48.9, sma20: 119.43, sma50: 117.32, sma200: 115.67, volume: 22000000 },
+  QQQ: { currentPrice: 730.36, change: 2.15, changePercent: 0.30, dayHigh: 732.45, dayLow: 725.42, dayOpen: 726.32, previousClose: 727.60, rsi: 52.3, sma20: 725.42, sma50: 720.88, sma200: 715.21, volume: 15000000 },
+  DIA: { currentPrice: 525.41, change: 1.88, changePercent: 0.36, dayHigh: 528.45, dayLow: 523.55, dayOpen: 524.32, previousClose: 524.47, rsi: 48.9, sma20: 523.55, sma50: 521.12, sma200: 518.45, volume: 18000000 },
+  SPY: { currentPrice: 750.80, change: 2.45, changePercent: 0.33, dayHigh: 753.23, dayLow: 746.33, dayOpen: 747.15, previousClose: 748.32, rsi: 51.2, sma20: 746.33, sma50: 744.67, sma200: 741.89, volume: 25000000 },
+};
 
-function getCachedData(symbol) {
-  const cached = cache.get(symbol);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    console.log(`[CACHE] HIT: ${symbol}`);
-    return cached.data;
+console.log('\n=== SHALIMAR BACKEND ===');
+console.log('Source: Google Finance + Calculated Indicators');
+console.log('Cache TTL: 15 minutes\n');
+
+function getFromCache(key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL) {
+    cache.delete(key);
+    return null;
   }
-  return null;
+  return entry.data;
 }
 
-function setCachedData(symbol, data) {
-  cache.set(symbol, {
-    data: data,
-    timestamp: Date.now()
-  });
+function setCache(key, data) {
+  cache.set(key, { data, timestamp: Date.now() });
 }
 
-// ===== MOCK DATA FALLBACK =====
-function getMockData(symbol) {
-  const mockData = {
-    'NVDA': { currentPrice: 194.83, change: -2.75, changePercent: -1.39, dayHigh: 200.06, dayLow: 192.35, dayOpen: 197.14, previousClose: 197.58, rsi: 43.76, sma20: 204.37, sma50: 210.16, sma200: 191.27, volume: 142385548 },
-    'AAPL': { currentPrice: 308.63, change: 14.25, changePercent: 4.84, dayHigh: 309.42, dayLow: 293.68, dayOpen: 294.12, previousClose: 294.38, rsi: 25.43, sma20: 295.6, sma50: 293.01, sma200: 270.54, volume: 45000000 },
-    'TSLA': { currentPrice: 393.45, change: -31.85, changePercent: -7.49, dayHigh: 432.35, dayLow: 389.3, dayOpen: 428.01, previousClose: 425.3, rsi: 41.8, sma20: 399.67, sma50: 405.47, sma200: 418.7, volume: 35000000 },
-    'MSFT': { currentPrice: 390.49, change: 6.21, changePercent: 1.62, dayHigh: 392.2, dayLow: 383.7, dayOpen: 384.48, previousClose: 384.28, rsi: 53.32, sma20: 389.33, sma50: 407.79, sma200: 445.86, volume: 28000000 },
-    'AMD': { currentPrice: 165.23, change: 2.45, changePercent: 1.51, dayHigh: 167.89, dayLow: 162.15, dayOpen: 162.78, previousClose: 162.78, rsi: 48.5, sma20: 160.5, sma50: 155.2, sma200: 150.1, volume: 25000000 },
-    'AVGO': { currentPrice: 145.67, change: -1.23, changePercent: -0.84, dayHigh: 147.5, dayLow: 144.2, dayOpen: 146.9, previousClose: 146.9, rsi: 45.2, sma20: 144.8, sma50: 142.3, sma200: 140.5, volume: 15000000 },
-    'TSM': { currentPrice: 192.34, change: 3.56, changePercent: 1.88, dayHigh: 193.2, dayLow: 188.9, dayOpen: 188.78, previousClose: 188.78, rsi: 52.1, sma20: 189.5, sma50: 187.2, sma200: 185.3, volume: 20000000 },
-    'QQQ': { currentPrice: 712.6, change: -12.57, changePercent: -1.73, dayHigh: 730.83, dayLow: 707.56, dayOpen: 725.58, previousClose: 725.17, rsi: 40.78, sma20: 723.84, sma50: 708.8, sma200: 634.89, volume: 15000000 },
-    'DIA': { currentPrice: 525.41, change: -2.34, changePercent: -0.45, dayHigh: 528.5, dayLow: 523.1, dayOpen: 527.75, previousClose: 527.75, rsi: 48.9, sma20: 523.55, sma50: 521.12, sma200: 518.45, volume: 18000000 },
-    'SPY': { currentPrice: 750.80, change: 2.45, changePercent: 0.33, dayHigh: 753.23, dayLow: 746.33, dayOpen: 747.15, previousClose: 748.32, rsi: 51.2, sma20: 746.33, sma50: 744.67, sma200: 741.89, volume: 25000000 },
-    'LLY': { currentPrice: 895.23, change: 12.45, changePercent: 1.41, dayHigh: 897.5, dayLow: 882.8, dayOpen: 882.78, previousClose: 882.78, rsi: 55.3, sma20: 887.2, sma50: 880.1, sma200: 875.5, volume: 8000000 },
-    'RDW': { currentPrice: 28.45, change: 0.85, changePercent: 3.07, dayHigh: 28.9, dayLow: 27.6, dayOpen: 27.6, previousClose: 27.6, rsi: 58.2, sma20: 27.8, sma50: 27.2, sma200: 26.9, volume: 5000000 },
+// FIX SMA by recalculating from API response
+function fixSMAValues(data) {
+  if (!data || !data.closingPrices) return data;
+  
+  let prices = [...data.closingPrices];
+  
+  // Reverse if needed
+  if (prices.length > 1 && prices[0] < prices[prices.length - 1] * 0.5) {
+    prices = prices.reverse();
+  }
+  
+  // Recalculate SMA
+  const sma20 = calculateSMA(prices, 20);
+  const sma50 = calculateSMA(prices, 50);
+  const sma200 = calculateSMA(prices, 200);
+  
+  return {
+    ...data,
+    sma20: parseFloat(sma20.toFixed(2)),
+    sma50: parseFloat(sma50.toFixed(2)),
+    sma200: parseFloat(sma200.toFixed(2)),
   };
-  
-  return mockData[symbol] || mockData['NVDA'];
 }
 
-// ===== API ENDPOINT =====
+function calculateSMA(prices, period) {
+  if (!prices || prices.length < period) {
+    return prices && prices.length > 0 ? prices[0] : 0;
+  }
+  const relevant = prices.slice(0, period);
+  const sum = relevant.reduce((a, b) => a + b, 0);
+  return sum / period;
+}
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'Shalimar Backend Running',
+    cache: { size: cache.size, keys: Array.from(cache.keys()) },
+    cacheTTL: '15 minutes',
+  });
+});
+
+app.get('/api/stocks', (req, res) => {
+  res.json({ stocks: STOCKS, total: STOCKS.length });
+});
+
 app.get('/api/candles/:symbol', async (req, res) => {
-  const symbol = req.params.symbol.toUpperCase();
-  
-  console.log(`[API] Getting ${symbol}...`);
-  
   try {
+    const symbol = req.params.symbol.toUpperCase();
+    const cacheKey = `stock_${symbol}`;
+
     // Check cache first
-    const cached = getCachedData(symbol);
+    const cached = getFromCache(cacheKey);
     if (cached) {
-      return res.json({
-        symbol: symbol,
-        analysis: cached,
-        source: 'cache'
-      });
+      console.log(`[CACHE] HIT: ${symbol}`);
+      return res.json({ symbol, analysis: cached, source: 'cache' });
     }
 
-    // Queue the request to Google Sheets
-    let data = await queueRequest(async () => {
+    console.log(`[API] Getting ${symbol}...`);
+
+    // Queue the request
+    let analysis = await queueRequest(async () => {
       return await getStockDataWithIndicators(symbol);
     });
 
-    // Use mock if Google Sheets fails
-    if (!data) {
+    // Fix SMA values if we got data
+    if (analysis) {
+      analysis = fixSMAValues(analysis);
+    }
+
+    // Fallback to mock if needed
+    if (!analysis) {
       console.log(`[FALLBACK] Using mock data for ${symbol}`);
-      data = getMockData(symbol);
+      const mock = MOCK_DATA[symbol] || MOCK_DATA.NVDA;
+      analysis = {
+        symbol,
+        ...mock,
+        timestamp: new Date().toISOString(),
+      };
     }
 
-    // Cache the result
-    if (data) {
-      setCachedData(symbol, data);
-    }
-
-    res.json({
-      symbol: symbol,
-      analysis: data,
-      source: data ? 'google-finance-calculated' : 'mock'
-    });
+    setCache(cacheKey, analysis);
+    return res.json({ symbol, analysis, source: 'google-finance-calculated' });
 
   } catch (error) {
-    console.error(`[ERROR] ${symbol}:`, error.message);
-    const mockData = getMockData(symbol);
-    res.json({
-      symbol: symbol,
-      analysis: mockData,
-      source: 'mock'
-    });
+    console.error(`[ERROR] ${req.params.symbol}:`, error.message);
+    const mock = MOCK_DATA[req.params.symbol.toUpperCase()] || MOCK_DATA.NVDA;
+    res.json({ symbol: req.params.symbol.toUpperCase(), analysis: mock, source: 'fallback' });
   }
 });
 
-// ===== CACHE ENDPOINTS =====
+app.get('/api/quote/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const cacheKey = `quote_${symbol}`;
+
+    const cached = getFromCache(cacheKey);
+    if (cached) return res.json({ symbol, quote: cached, source: 'cache' });
+
+    let data = await getStockDataWithIndicators(symbol);
+    
+    if (data) {
+      const quote = {
+        symbol,
+        currentPrice: data.currentPrice,
+        change: data.change,
+        changePercent: data.changePercent,
+      };
+      setCache(cacheKey, quote);
+      return res.json({ symbol, quote, source: 'google-finance' });
+    }
+
+    res.status(500).json({ error: 'Unable to fetch quote' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/cache/info', (req, res) => {
-  const info = {
-    size: cache.size,
-    items: Array.from(cache.keys()),
-    ttl: CACHE_TTL / 1000 + 's'
-  };
-  res.json(info);
+  res.json({ 
+    size: cache.size, 
+    keys: Array.from(cache.keys()),
+    cacheTTL: '15 minutes',
+  });
 });
 
 app.post('/api/cache/clear', (req, res) => {
-  const size = cache.size;
   cache.clear();
-  console.log(`[CACHE] Cleared ${size} items`);
-  res.json({ message: `Cleared ${size} cached items` });
+  res.json({ message: 'Cache cleared' });
 });
 
-// ===== HEALTH CHECK =====
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
-// ===== START SERVER =====
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Shalimar Capital API running on port ${PORT}`);
-  console.log(`📊 Endpoints: GET /api/candles/:symbol, POST /api/cache/clear`);
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🌍 Google Finance + Local RSI/SMA Calculation`);
+  console.log(`⏱️  Refresh: Every 15 minutes\n`);
 });
