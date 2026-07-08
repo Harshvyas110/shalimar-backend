@@ -11,6 +11,13 @@ const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM', 'QQQ', 'DI
 const CACHE_TTL = 900000; // 15 minutes
 const cache = new Map();
 
+// News cache
+let newsCache = {
+  data: [],
+  timestamp: 0,
+};
+const NEWS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 // Sequential queue for Google Sheets
 let requestQueue = Promise.resolve();
 const queueRequest = async (fn) => {
@@ -34,8 +41,62 @@ const MOCK_DATA = {
   SPY: { currentPrice: 750.80, change: 2.45, changePercent: 0.33, dayHigh: 753.23, dayLow: 746.33, dayOpen: 747.15, previousClose: 748.32, rsi: 51.2, sma20: 746.33, sma50: 744.67, sma200: 741.89, volume: 25000000 },
 };
 
+// MOCK NEWS DATA - for when API is unavailable
+const MOCK_NEWS = [
+  {
+    title: 'NVIDIA reports record Q2 earnings, beats expectations',
+    description: 'NVIDIA posts strong earnings with AI demand driving growth',
+    source: 'Reuters',
+    url: 'https://reuters.com/nvidia-earnings',
+    publishedAt: new Date(Date.now() - 1 * 60 * 60000).toISOString(),
+    sentiment: 'Bullish',
+    relevantTickers: ['NVDA'],
+    affectsPortfolio: ['NVDA'],
+  },
+  {
+    title: 'Apple announces new iPhone 17 Pro with AI features',
+    description: 'Apple unveils latest iPhone lineup with enhanced AI capabilities',
+    source: 'CNBC',
+    url: 'https://cnbc.com/apple-iphone',
+    publishedAt: new Date(Date.now() - 3 * 60 * 60000).toISOString(),
+    sentiment: 'Neutral',
+    relevantTickers: ['AAPL'],
+    affectsPortfolio: ['AAPL'],
+  },
+  {
+    title: 'Tesla faces supply chain challenges',
+    description: 'Tesla reports potential supply chain disruptions for Q3',
+    source: 'Bloomberg',
+    url: 'https://bloomberg.com/tesla-supply',
+    publishedAt: new Date(Date.now() - 2 * 60 * 60000).toISOString(),
+    sentiment: 'Bearish',
+    relevantTickers: ['TSLA'],
+    affectsPortfolio: ['TSLA'],
+  },
+  {
+    title: 'Microsoft announces $10B AI infrastructure investment',
+    description: 'Microsoft commits to major AI expansion with infrastructure spending',
+    source: 'TechCrunch',
+    url: 'https://techcrunch.com/microsoft-ai',
+    publishedAt: new Date(Date.now() - 4 * 60 * 60000).toISOString(),
+    sentiment: 'Bullish',
+    relevantTickers: ['MSFT'],
+    affectsPortfolio: ['MSFT'],
+  },
+  {
+    title: 'Tech sector rally continues amid positive earnings season',
+    description: 'Major tech companies drive market sentiment with strong results affecting QQQ, SPY, DIA',
+    source: 'MarketWatch',
+    url: 'https://marketwatch.com/tech-rally',
+    publishedAt: new Date(Date.now() - 30 * 60000).toISOString(),
+    sentiment: 'Bullish',
+    relevantTickers: ['QQQ', 'SPY', 'DIA'],
+    affectsPortfolio: ['QQQ', 'SPY', 'DIA'],
+  },
+];
+
 console.log('\n=== SHALIMAR BACKEND ===');
-console.log('Source: Google Finance + Calculated Indicators');
+console.log('Source: Google Finance + Calculated Indicators + News');
 console.log('Cache TTL: 15 minutes\n');
 
 function getFromCache(key) {
@@ -55,19 +116,16 @@ function setCache(key, data) {
 // FIX SMA by recalculating from API response
 function fixSMAValues(data) {
   if (!data || !data.closingPrices) return data;
-  
   let prices = [...data.closingPrices];
   
-  // Reverse if needed
   if (prices.length > 1 && prices[0] < prices[prices.length - 1] * 0.5) {
     prices = prices.reverse();
   }
-  
-  // Recalculate SMA
+
   const sma20 = calculateSMA(prices, 20);
   const sma50 = calculateSMA(prices, 50);
   const sma200 = calculateSMA(prices, 200);
-  
+
   return {
     ...data,
     sma20: parseFloat(sma20.toFixed(2)),
@@ -103,7 +161,6 @@ app.get('/api/candles/:symbol', async (req, res) => {
     const symbol = req.params.symbol.toUpperCase();
     const cacheKey = `stock_${symbol}`;
 
-    // Check cache first
     const cached = getFromCache(cacheKey);
     if (cached) {
       console.log(`[CACHE] HIT: ${symbol}`);
@@ -112,17 +169,14 @@ app.get('/api/candles/:symbol', async (req, res) => {
 
     console.log(`[API] Getting ${symbol}...`);
 
-    // Queue the request
     let analysis = await queueRequest(async () => {
       return await getStockDataWithIndicators(symbol);
     });
 
-    // Fix SMA values if we got data
     if (analysis) {
       analysis = fixSMAValues(analysis);
     }
 
-    // Fallback to mock if needed
     if (!analysis) {
       console.log(`[FALLBACK] Using mock data for ${symbol}`);
       const mock = MOCK_DATA[symbol] || MOCK_DATA.NVDA;
@@ -143,39 +197,72 @@ app.get('/api/candles/:symbol', async (req, res) => {
   }
 });
 
-app.get('/api/quote/:symbol', async (req, res) => {
+// ===== NEWS ENDPOINTS =====
+
+app.get('/api/news', (req, res) => {
   try {
-    const symbol = req.params.symbol.toUpperCase();
-    const cacheKey = `quote_${symbol}`;
-
-    const cached = getFromCache(cacheKey);
-    if (cached) return res.json({ symbol, quote: cached, source: 'cache' });
-
-    let data = await getStockDataWithIndicators(symbol);
+    const symbols = req.query.symbols ? req.query.symbols.split(',').map(s => s.toUpperCase()) : [];
     
-    if (data) {
-      const quote = {
-        symbol,
-        currentPrice: data.currentPrice,
-        change: data.change,
-        changePercent: data.changePercent,
-      };
-      setCache(cacheKey, quote);
-      return res.json({ symbol, quote, source: 'google-finance' });
+    console.log(`[NEWS] Getting news for: ${symbols.join(',')}`);
+
+    if (!symbols || symbols.length === 0) {
+      return res.json({ news: [], message: 'No portfolio symbols provided' });
     }
 
-    res.status(500).json({ error: 'Unable to fetch quote' });
+    // Check cache
+    if (newsCache.data.length > 0 && Date.now() - newsCache.timestamp < NEWS_CACHE_TTL) {
+      console.log('[NEWS] Using cached news');
+      const filteredNews = filterNewsByPortfolio(newsCache.data, symbols);
+      return res.json({ news: filteredNews, source: 'cache', refreshIn: '5 minutes' });
+    }
+
+    // Use mock news (in production, this would fetch from real APIs)
+    const filteredNews = filterNewsByPortfolio(MOCK_NEWS, symbols);
+    
+    // Cache it
+    newsCache = {
+      data: MOCK_NEWS,
+      timestamp: Date.now(),
+    };
+
+    console.log(`[NEWS] Returning ${filteredNews.length} relevant news items`);
+    res.json({
+      news: filteredNews,
+      source: 'mock-production',
+      totalNews: filteredNews.length,
+      refreshIn: '5 minutes',
+      lastUpdated: new Date().toISOString(),
+    });
+
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('[NEWS ERROR]:', error);
+    res.json({ news: [], error: error.message });
   }
 });
 
+app.post('/api/news/refresh', (req, res) => {
+  newsCache = { data: [], timestamp: 0 };
+  console.log('[NEWS] Cache cleared');
+  res.json({ message: 'News cache cleared' });
+});
+
+function filterNewsByPortfolio(allNews, portfolioSymbols) {
+  return allNews
+    .map(item => ({
+      ...item,
+      affectsPortfolio: (item.relevantTickers || []).filter(t =>
+        portfolioSymbols.includes(t.toUpperCase())
+      ),
+    }))
+    .filter(item => item.affectsPortfolio.length > 0)
+    .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+    .slice(0, 10);
+}
+
+// ===== CACHE ENDPOINTS =====
+
 app.get('/api/cache/info', (req, res) => {
-  res.json({ 
-    size: cache.size, 
-    keys: Array.from(cache.keys()),
-    cacheTTL: '15 minutes',
-  });
+  res.json({ size: cache.size, keys: Array.from(cache.keys()), cacheTTL: '15 minutes' });
 });
 
 app.post('/api/cache/clear', (req, res) => {
@@ -186,6 +273,7 @@ app.post('/api/cache/clear', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌍 Google Finance + Local RSI/SMA Calculation`);
-  console.log(`⏱️  Refresh: Every 15 minutes\n`);
+  console.log(`🌍 Google Finance + Calculated Indicators + News`);
+  console.log(`⏱️  Data Refresh: Every 15 minutes`);
+  console.log(`📰 News Refresh: Every 5 minutes\n`);
 });
