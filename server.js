@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 const STOCKS = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMD', 'AVGO', 'TSM', 'QQQ', 'DIA', 'SPY'];
-const CACHE_TTL = 900000; // 15 minutes
+const CACHE_TTL = 60000; // 1 minute
 const cache = new Map();
 
 // News cache
@@ -97,7 +97,7 @@ const MOCK_NEWS = [
 
 console.log('\n=== SHALIMAR BACKEND ===');
 console.log('Source: Google Finance + Calculated Indicators + News');
-console.log('Cache TTL: 15 minutes\n');
+console.log('Cache TTL: 1 minute\n');
 
 function getFromCache(key) {
   const entry = cache.get(key);
