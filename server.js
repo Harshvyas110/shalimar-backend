@@ -4,21 +4,6 @@ require('dotenv').config();
 
 const yahooFinanceService = require('./services/yahooFinanceService');
 
-// ===== FIREBASE ADMIN SETUP =====
-const admin = require('firebase-admin');
-
-// Initialize Firebase Admin
-const serviceAccount = require('./firebase-adminsdk.json');
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  projectId: 'shalimar-capital',
-});
-
-const auth = admin.auth();
-const db = admin.firestore();
-// ===== END FIREBASE SETUP =====
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -29,10 +14,6 @@ app.use(express.json());
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
-
-// ========================================
-// STOCK DATA ENDPOINTS (YOUR ORIGINAL CODE)
-// ========================================
 
 // Get 15-min candles with RSI, SMA, Volume
 app.get('/api/candles/:symbol', async (req, res) => {
@@ -87,83 +68,10 @@ app.get('/api/stocks', async (req, res) => {
   }
 });
 
-// ========================================
-// AUTHENTICATION ENDPOINTS (NEW)
-// ========================================
-
-// ===== FORGOT PASSWORD ENDPOINT =====
-app.post('/api/auth/forgot-password', async (req, res) => {
-  const { email } = req.body;
-  
-  try {
-    console.log(`[AUTH] Forgot password request for: ${email}`);
-    
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
-    }
-    
-    // Send password reset email via Firebase
-    await auth.sendPasswordResetEmail(email);
-    
-    res.json({ 
-      success: true, 
-      message: 'Password reset link sent to email. Check your inbox!' 
-    });
-    
-  } catch (error) {
-    console.error('[AUTH] Forgot password error:', error);
-    
-    if (error.code === 'auth/user-not-found') {
-      return res.status(400).json({ 
-        error: 'Email not found. Please sign up first.' 
-      });
-    }
-    
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// ===== CHECK IF EMAIL EXISTS =====
-app.post('/api/auth/check-email', async (req, res) => {
-  const { email } = req.body;
-  
-  try {
-    console.log(`[AUTH] Checking email: ${email}`);
-    
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
-    }
-    
-    // Try to get user by email
-    const user = await auth.getUserByEmail(email);
-    
-    // If we get here, email EXISTS
-    res.json({ 
-      exists: true,
-      message: 'Email already registered. Please login or use forgot password.' 
-    });
-    
-  } catch (error) {
-    if (error.code === 'auth/user-not-found') {
-      // Email does NOT exist - good for signup!
-      return res.json({ 
-        exists: false,
-        message: 'Email available for registration' 
-      });
-    }
-    
-    console.error('[AUTH] Email check error:', error);
-    res.status(400).json({ error: error.message });
-  }
-});
-
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Shalimar Backend running on port ${PORT}`);
-  console.log(`📈 Stock data endpoints active:`);
-  console.log(`   - GET /api/candles/:symbol`);
-  console.log(`   - GET /api/stocks`);
-  console.log(`🔐 Firebase Admin initialized - Auth enabled:`);
-  console.log(`   - POST /api/auth/forgot-password`);
-  console.log(`   - POST /api/auth/check-email`);
+  console.log(`📈 Using Yahoo Finance for 15-min candles`);
+  console.log(`📊 Using Alpha Vantage for volume data`);
+  console.log(`🔄 Auto-refresh every 15 minutes`);
 });
