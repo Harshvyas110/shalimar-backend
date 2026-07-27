@@ -8,6 +8,7 @@ try {
   yahooFinanceService = require('./services/yahooFinanceService');
 } catch (err) {
   console.warn('⚠️  yahooFinanceService not found, skipping stock endpoints');
+  yahooFinanceService = null;
 }
 
 // ===== FIREBASE ADMIN SETUP =====
@@ -114,7 +115,10 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       return res.status(400).json({ error: 'Email is required' });
     }
     
-    await auth.sendPasswordResetEmail(email);
+    // Generate password reset link using Firebase Admin SDK
+    const resetLink = await admin.auth().generatePasswordResetLink(email);
+    
+    console.log(`✅ Password reset link generated for: ${email}`);
     
     res.json({ 
       success: true, 
@@ -122,7 +126,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('[AUTH] Forgot password error:', error);
+    console.error('[AUTH] Forgot password error:', error.message);
     
     if (error.code === 'auth/user-not-found') {
       return res.status(400).json({ 
@@ -145,22 +149,27 @@ app.post('/api/auth/check-email', async (req, res) => {
       return res.status(400).json({ error: 'Email is required' });
     }
     
-    const user = await auth.getUserByEmail(email);
-    
-    res.json({ 
-      exists: true,
-      message: 'Email already registered. Please login or use forgot password.' 
-    });
-    
-  } catch (error) {
-    if (error.code === 'auth/user-not-found') {
-      return res.json({ 
-        exists: false,
-        message: 'Email available for registration' 
+    try {
+      const user = await admin.auth().getUserByEmail(email);
+      
+      // If we get here, email EXISTS
+      res.json({ 
+        exists: true,
+        message: 'Email already registered. Please login or use forgot password.' 
       });
+    } catch (error) {
+      if (error.code === 'auth/user-not-found') {
+        // Email does NOT exist - good for signup!
+        return res.json({ 
+          exists: false,
+          message: 'Email available for registration' 
+        });
+      }
+      throw error;
     }
     
-    console.error('[AUTH] Email check error:', error);
+  } catch (error) {
+    console.error('[AUTH] Email check error:', error.message);
     res.status(400).json({ error: error.message });
   }
 });
@@ -172,8 +181,10 @@ app.listen(PORT, () => {
     console.log(`📈 Using Yahoo Finance for 15-min candles`);
     console.log(`📊 Using Alpha Vantage for volume data`);
     console.log(`🔄 Auto-refresh every 15 minutes`);
+  } else {
+    console.log(`⚠️  Stock service not available (using auth only)`);
   }
-  console.log(`🔐 Firebase Auth endpoints active:`);
+  console.log(`🔐 Firebase Admin initialized - Auth endpoints active:`);
   console.log(`   - POST /api/auth/forgot-password`);
   console.log(`   - POST /api/auth/check-email`);
 });
