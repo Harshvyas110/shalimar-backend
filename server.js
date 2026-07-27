@@ -2,7 +2,26 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-const yahooFinanceService = require('./services/yahooFinanceService');
+// Try to load yahoo finance service, but don't crash if it doesn't exist
+let yahooFinanceService;
+try {
+  yahooFinanceService = require('./services/yahooFinanceService');
+} catch (err) {
+  console.warn('⚠️  yahooFinanceService not found, skipping stock endpoints');
+}
+
+// ===== FIREBASE ADMIN SETUP =====
+const admin = require('firebase-admin');
+
+const serviceAccount = require('./firebase-adminsdk.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  projectId: 'shalimar-capital',
+});
+
+const auth = admin.auth();
+// ===== END FIREBASE SETUP =====
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,8 +34,16 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// ========================================
+// STOCK DATA ENDPOINTS (ORIGINAL)
+// ========================================
+
 // Get 15-min candles with RSI, SMA, Volume
 app.get('/api/candles/:symbol', async (req, res) => {
+  if (!yahooFinanceService) {
+    return res.status(503).json({ error: 'Stock service not available' });
+  }
+
   const symbol = req.params.symbol.toUpperCase();
 
   try {
@@ -43,6 +70,10 @@ app.get('/api/candles/:symbol', async (req, res) => {
 
 // Get multiple stocks
 app.get('/api/stocks', async (req, res) => {
+  if (!yahooFinanceService) {
+    return res.status(503).json({ error: 'Stock service not available' });
+  }
+
   const symbols = ['NVDA', 'AAPL', 'TSLA', 'MSFT'];
 
   try {
@@ -68,10 +99,81 @@ app.get('/api/stocks', async (req, res) => {
   }
 });
 
+// ========================================
+// AUTHENTICATION ENDPOINTS (NEW)
+// ========================================
+
+// ===== FORGOT PASSWORD ENDPOINT =====
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  
+  try {
+    console.log(`[AUTH] Forgot password request for: ${email}`);
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    
+    await auth.sendPasswordResetEmail(email);
+    
+    res.json({ 
+      success: true, 
+      message: 'Password reset link sent to email. Check your inbox!' 
+    });
+    
+  } catch (error) {
+    console.error('[AUTH] Forgot password error:', error);
+    
+    if (error.code === 'auth/user-not-found') {
+      return res.status(400).json({ 
+        error: 'Email not found. Please sign up first.' 
+      });
+    }
+    
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// ===== CHECK IF EMAIL EXISTS =====
+app.post('/api/auth/check-email', async (req, res) => {
+  const { email } = req.body;
+  
+  try {
+    console.log(`[AUTH] Checking email: ${email}`);
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    
+    const user = await auth.getUserByEmail(email);
+    
+    res.json({ 
+      exists: true,
+      message: 'Email already registered. Please login or use forgot password.' 
+    });
+    
+  } catch (error) {
+    if (error.code === 'auth/user-not-found') {
+      return res.json({ 
+        exists: false,
+        message: 'Email available for registration' 
+      });
+    }
+    
+    console.error('[AUTH] Email check error:', error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Shalimar Backend running on port ${PORT}`);
-  console.log(`📈 Using Yahoo Finance for 15-min candles`);
-  console.log(`📊 Using Alpha Vantage for volume data`);
-  console.log(`🔄 Auto-refresh every 15 minutes`);
+  if (yahooFinanceService) {
+    console.log(`📈 Using Yahoo Finance for 15-min candles`);
+    console.log(`📊 Using Alpha Vantage for volume data`);
+    console.log(`🔄 Auto-refresh every 15 minutes`);
+  }
+  console.log(`🔐 Firebase Auth endpoints active:`);
+  console.log(`   - POST /api/auth/forgot-password`);
+  console.log(`   - POST /api/auth/check-email`);
 });
